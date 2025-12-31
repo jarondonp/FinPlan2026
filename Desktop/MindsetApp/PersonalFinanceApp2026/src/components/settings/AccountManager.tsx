@@ -137,7 +137,20 @@ const AccountEditor = ({ form, setForm, onSave, onCancel }: any) => {
                 </div>
                 <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Saldo Actual</label>
-                    <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.balance || 0} onChange={e => setForm({ ...form, balance: parseFloat(e.target.value) })} />
+                    <div className="relative">
+                        <input
+                            type="number"
+                            disabled={!!form.id} // Disable if editing existing
+                            className={`w-full px-3 py-2 border rounded-lg text-sm ${!!form.id ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+                            value={form.balance || 0}
+                            onChange={e => setForm({ ...form, balance: parseFloat(e.target.value) })}
+                        />
+                        {!!form.id && (
+                            <div className="absolute right-0 top-full mt-1 text-[10px] text-amber-600 font-medium">
+                                * Para ajustar, usa una transacción.
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Advanced Fields for Credit/Loans */}

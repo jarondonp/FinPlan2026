@@ -4,14 +4,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency, getRandomColor, generateId } from '../../utils';
 import { Goal, CategoryDef } from '../../types';
-import { useScope } from '../../context/GlobalFilterContext';
+import { useGlobalFilter } from '../../context/GlobalFilterContext';
+import { closingService } from '../../services/ClosingService';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;
 }
 
 export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
-    const { scope } = useScope();
+    const { filterState } = useGlobalFilter();
+    const { scope, timeframe } = filterState;
+
     // Data Fetching
     const transactions = useLiveQuery(() => db.transactions
         .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
@@ -33,6 +36,19 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     const [isAddingGoal, setIsAddingGoal] = useState(false);
     const [newGoal, setNewGoal] = useState<Partial<Goal>>({});
     const [isEditingBudgets, setIsEditingBudgets] = useState(false);
+    const [isMonthClosed, setIsMonthClosed] = useState(false); // Protection state
+
+    // Check Status
+    React.useEffect(() => {
+        // We use the start of the current month based on real time, 
+        // OR should we use the timeframe.start? 
+        // The budget component calculates based on: new Date().toISOString().slice(0, 7)
+        // so we must lock based on THAT same period.
+        const currentBudgetMonth = new Date(); // Today
+        closingService.getStatus(currentBudgetMonth, scope).then(status => {
+            setIsMonthClosed(status === 'CLOSED' || status === 'LOCKED');
+        });
+    }, [scope]);
 
     // Budget Calculations
     const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
@@ -157,9 +173,16 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             <PiggyBank size={18} className="text-emerald-600" /> Presupuesto
                         </h3>
                         <div className="flex gap-2">
-                            <button onClick={() => setIsEditingBudgets(!isEditingBudgets)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border ${isEditingBudgets ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-                                {isEditingBudgets ? "Terminar Edición" : "Editar Presupuesto"}
-                            </button>
+                            {/* Month Status Protection */}
+                            {isMonthClosed ? (
+                                <span className="text-xs font-bold text-slate-400 px-3 py-1.5 bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200 cursor-not-allowed" title="El mes está cerrado, no se puede editar el presupuesto.">
+                                    <AlertTriangle size={12} /> Lectura
+                                </span>
+                            ) : (
+                                <button onClick={() => setIsEditingBudgets(!isEditingBudgets)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border ${isEditingBudgets ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                    {isEditingBudgets ? "Terminar Edición" : "Editar Presupuesto"}
+                                </button>
+                            )}
                         </div>
                     </div>
 

@@ -100,3 +100,22 @@ export interface RecurringExpense {
   autoPay: boolean; // If true, funds deducted automatically
   scope?: Scope;
 }
+
+// --- Phase 2: Closing Engine ---
+
+export type MonthStatus = 'OPEN' | 'CLOSED' | 'LOCKED';
+
+export interface MonthlyClosing {
+  id: string;             // Format: "YYYY-MM-SCOPE" (Composite Key)
+  monthStr: string;       // Format: "YYYY-MM"
+  scope: Scope;           // PERSONAL | BUSINESS
+  status: MonthStatus;
+  closedAt?: string;      // ISO Date
+  closedBy?: string;      // User ID (future proof)
+  notes?: string;
+
+  // Snapshots
+  finalAssets: number;
+  finalLiabilities: number;
+  finalNetWorth: number;
+}

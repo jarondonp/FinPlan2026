@@ -7,6 +7,7 @@ import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard } from 'lucide-react';
+import { MonthStatusBadge } from '../closing/MonthStatusBadge';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
@@ -125,6 +126,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
             <h1 className="text-3xl font-bold text-slate-900 mb-8 flex items-center gap-3">
                 Dashboard
                 {scope === 'BUSINESS' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full uppercase tracking-wider border border-blue-200">Empresa</span>}
+                <MonthStatusBadge />
             </h1>
 
             {/* Consistency Alert Area */}

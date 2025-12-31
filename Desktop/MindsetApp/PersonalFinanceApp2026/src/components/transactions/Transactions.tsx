@@ -4,11 +4,24 @@ import { db } from '../../db/db';
 import { aiService } from '../../services/aiService';
 import { formatCurrency } from '../../utils';
 import { Search, Sparkles, Trash2, Loader2, Save } from 'lucide-react';
+import { closingService } from '../../services/ClosingService';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
+import { MonthStatusBadge } from '../closing/MonthStatusBadge';
 
 export const Transactions = () => {
     const { filterState } = useGlobalFilter();
     const { scope, selectedAccountIds, timeframe } = filterState;
+
+    // Status State
+    const [isLocked, setIsLocked] = useState(false);
+
+    // Check Lock Status
+    React.useEffect(() => {
+        closingService.getStatus(timeframe.start, scope).then(status => {
+            setIsLocked(status === 'LOCKED' || status === 'CLOSED');
+        });
+    }, [timeframe, scope]);
+
     // Queries
     const transactions = useLiveQuery(() => db.transactions
         .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
@@ -28,10 +41,6 @@ export const Transactions = () => {
 
     // AI State
     const [isCategorizing, setIsCategorizing] = useState(false);
-
-    // Filter Logic
-    // const { filterState } = useScope(); // REMOVED: Already destructured at top
-    // const { selectedAccountIds, timeframe } = filterState; // Used from top scope or destructured here if not at top
 
     // Filter Logic
 
@@ -58,12 +67,14 @@ export const Transactions = () => {
 
     // Handlers
     const handleDelete = (id: string) => {
+        if (isLocked) return alert("Acción denegada: El mes está cerrado.");
         if (confirm("¿Eliminar transacción?")) {
             db.transactions.delete(id);
         }
     }
 
     const handleCategoryChange = (id: string, newCategory: string) => {
+        if (isLocked) return alert("El mes está cerrado. No se pueden editar categorías.");
         db.transactions.update(id, { category: newCategory, needs_review: false });
     };
 
@@ -101,7 +112,10 @@ export const Transactions = () => {
         <div className="p-8 max-w-7xl mx-auto animate-in fade-in duration-500 h-full flex flex-col">
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Transacciones</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Transacciones</h1>
+                        <MonthStatusBadge />
+                    </div>
                     <p className="text-slate-500">Historial completo de movimientos.</p>
                 </div>
 
@@ -109,8 +123,9 @@ export const Transactions = () => {
                     {/* AI Button */}
                     <button
                         onClick={handleAutoCategorize}
-                        disabled={isCategorizing}
-                        className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-bold shadow-lg shadow-indigo-200 hover:shadow-xl transition-all flex items-center gap-2 text-sm disabled:opacity-50"
+                        disabled={isCategorizing || isLocked}
+                        className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-bold shadow-lg shadow-indigo-200 hover:shadow-xl transition-all flex items-center gap-2 text-sm disabled:opacity-50 disabled:grayscale"
+                        title={isLocked ? "Mes cerrado. No se pueden modificar transacciones." : "Categorizar con IA"}
                     >
                         {isCategorizing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
                         {isCategorizing ? 'Analizando...' : 'Auto-Categorizar con AI'}
@@ -165,8 +180,10 @@ export const Transactions = () => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <select
+                                                disabled={isLocked}
                                                 className={`text-xs font-bold px-2 py-1 rounded-lg border-transparent hover:border-slate-200 hover:bg-white transition-all cursor-pointer focus:ring-2 focus:ring-indigo-500 outline-none
-                                                    ${t.category === 'Uncategorized' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}
+                                                    ${t.category === 'Uncategorized' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}
+                                                    ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                 value={t.category}
                                                 onChange={(e) => handleCategoryChange(t.id, e.target.value)}
                                             >

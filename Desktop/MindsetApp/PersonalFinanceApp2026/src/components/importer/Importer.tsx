@@ -121,6 +121,51 @@ export const Importer = () => {
     // --- Step 3: Save ---
     const handleSave = async () => {
         if (previewData.length === 0) return;
+
+        // Validation: Check for Closed Months
+        // We check unique months involved to minimize DB calls
+        const uniqueMonths = new Set(previewData.map(t => t.date.slice(0, 7))); // YYYY-MM
+        const importScope = scope === 'PERSONAL' ? 'PERSONAL' : 'BUSINESS'; // Explicit scope
+
+        let blockedMonth = null;
+        for (const monthKey of uniqueMonths) {
+            // Create a date object for the first of that month to check status
+            const [y, m] = monthKey.split('-').map(Number);
+            const checkDate = new Date(y, m - 1, 1);
+
+            // We need to import 'closingService' at the top of the file separately
+            // But since we can't easily add imports in this block, we assume it's available or will add it in a subsequent step if missing.
+            // Actually, best to add the import first. I will add the import in a separate tool call if needed, 
+            // but for now I will assume I can't use it without importing.
+            // Wait, I can't easily async check inside a sync map or simple loop efficiently without the service imported.
+
+            // Let's use the closingService. 
+        }
+
+        // RE-WRITING LOGIC TO BE CLEANER
+        // 1. Get all statuses
+        try {
+            const statusChecks = Array.from(uniqueMonths).map(async (mKey) => {
+                const [y, m] = mKey.split('-').map(Number);
+                const d = new Date(y, m - 1, 1);
+                const status = await import('../../services/ClosingService').then(mod => mod.closingService.getStatus(d, scope));
+                return { mKey, status };
+            });
+
+            const results = await Promise.all(statusChecks);
+            const closed = results.find(r => r.status === 'CLOSED' || r.status === 'LOCKED');
+
+            if (closed) {
+                alert(`Error de Integridad:\n\nNo puedes importar transacciones para ${closed.mKey} porque ese mes está CERRADO.\n\nPor favor elimina esas filas del archivo o reabre el mes primero.`);
+                return;
+            }
+
+        } catch (e) {
+            console.error(e);
+            alert("Error validando estado del mes.");
+            return;
+        }
+
         if (window.confirm(`¿Importar ${previewData.length} transacciones?`)) {
             await db.transactions.bulkAdd(previewData);
             alert("¡Importación exitosa!");

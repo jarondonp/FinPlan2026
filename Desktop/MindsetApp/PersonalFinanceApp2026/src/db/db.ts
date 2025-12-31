@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Transaction, Account, Goal, Rule, CategoryDef, IncomeSource, RecurringExpense } from '../types';
+import { Transaction, Account, Goal, Rule, CategoryDef, IncomeSource, RecurringExpense, MonthlyClosing } from '../types';
 import { DEFAULT_CATEGORIES } from '../utils';
 
 export class FinMapDB extends Dexie {
@@ -11,17 +11,19 @@ export class FinMapDB extends Dexie {
     // Phase 2
     incomeSources!: Table<IncomeSource>;
     recurringExpenses!: Table<RecurringExpense>;
+    monthlyClosings!: Table<MonthlyClosing>;
 
     constructor() {
         super('FinMapDB');
-        this.version(3).stores({
+        this.version(4).stores({
             transactions: 'id, date, type, category, account_id, scope',
             accounts: 'id, type, scope',
             goals: 'id, scope',
             rules: 'id, scope',
             categories: 'name, scope',
             incomeSources: 'id, scope',
-            recurringExpenses: 'id, category, scope'
+            recurringExpenses: 'id, category, scope',
+            monthlyClosings: 'id, monthStr, scope, status'
         });
     }
 
