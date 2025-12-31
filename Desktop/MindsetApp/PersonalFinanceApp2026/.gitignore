@@ -47,3 +47,4 @@ dist-ssr
 # Local System Files
 .DS_Store
 Thumbs.db
+PRIVATE_DOCS.md
