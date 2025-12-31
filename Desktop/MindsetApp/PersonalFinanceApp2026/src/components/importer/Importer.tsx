@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { Transaction } from '../../types';
-import { generateId } from '../../utils';
+import { generateId, formatMonth } from '../../utils';
 import { parseCSV } from '../../utils/csvParser';
 import { Upload, CheckCircle, ArrowRight, Loader2, FileText, Settings, AlertCircle, Save } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
@@ -24,25 +24,98 @@ export const Importer = () => {
     const [parsedMatrix, setParsedMatrix] = useState<string[][]>([]);
     const [selectedAccount, setSelectedAccount] = useState<string>("");
 
+    // Global override for Year
+    const [importYear, setImportYear] = useState<number>(new Date().getFullYear());
+
     // Mapping State (Column Indices)
     const [mapConfig, setMapConfig] = useState({
         date: -1,
         description: -1,
         amount: -1,
-        headerRow: true
+        headerRow: true,
+        invertSign: false // New config option
     });
 
     const [previewData, setPreviewData] = useState<Transaction[]>([]);
 
+    // --- Filter & Selection State (New) ---
+    const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+    const [activeMonthFilter, setActiveMonthFilter] = useState<string>('ALL');
+
+    // Auto-select all on data load
+    React.useEffect(() => {
+        if (previewData.length > 0) {
+            setSelectedIndices(new Set(previewData.map((_, i) => i)));
+        }
+    }, [previewData]);
+
+    // Derived: Group by Month
+    const monthsInImport = React.useMemo(() => {
+        const counts: Record<string, number> = {};
+        previewData.forEach(t => {
+            const m = t.date.slice(0, 7); // YYYY-MM
+            counts[m] = (counts[m] || 0) + 1;
+        });
+        return Object.entries(counts).sort((a, b) => b[0].localeCompare(a[0])); // Descending
+    }, [previewData]);
+
+    const toggleSelection = (index: number) => {
+        const newSet = new Set(selectedIndices);
+        if (newSet.has(index)) newSet.delete(index);
+        else newSet.add(index);
+        setSelectedIndices(newSet);
+    };
+
     // --- Step 1: Upload / Parse ---
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [isAnalyzing, setIsAnalyzing] = useState(false); // New state
+
+    // --- Step 1: Upload / Parse ---
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            if (evt.target?.result) setRawText(evt.target.result as string);
-        };
-        reader.readAsText(file);
+
+        // Check if image
+        if (file.type.startsWith('image/')) {
+            setIsAnalyzing(true);
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+                const base64 = evt.target?.result as string;
+                if (!base64) return;
+
+                try {
+                    const aiService = await import('../../services/aiService').then(m => m.aiService);
+                    const matrix = await aiService.extractTransactionsFromImage(base64);
+
+                    if (matrix && matrix.length > 0) {
+                        setParsedMatrix(matrix);
+                        // Auto-guess columns (simplified for AI output which is standard)
+                        setMapConfig({
+                            date: 0,
+                            description: 1,
+                            amount: 2,
+                            headerRow: false, // AI usually returns just data, but we can verify. Usually headers are stripped by prompt.
+                            invertSign: false
+                        });
+                        setStep('MAP');
+                    } else {
+                        alert("No se pudieron extraer datos de la imagen.");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert("Error analizando imagen con IA. Revisa tu consola.");
+                } finally {
+                    setIsAnalyzing(false);
+                }
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // Text/CSV Fallback
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                if (evt.target?.result) setRawText(evt.target.result as string);
+            };
+            reader.readAsText(file);
+        }
     };
 
     const processRawText = () => {
@@ -61,7 +134,8 @@ export const Importer = () => {
             date: dateIdx >= 0 ? dateIdx : 0,
             description: descIdx >= 0 ? descIdx : 1,
             amount: amtIdx >= 0 ? amtIdx : 2,
-            headerRow: true
+            headerRow: true,
+            invertSign: false
         });
 
         setStep('MAP');
@@ -81,16 +155,23 @@ export const Importer = () => {
             const descRaw = row[mapConfig.description] || "Sin descripción";
             const amtRaw = row[mapConfig.amount] || "0";
 
-            // Parse Date (Basic ISO support or US/EU formats)
+            // Parse Date
             let dateStr = new Date().toISOString().split('T')[0];
             const dateObj = new Date(dateRaw);
             if (!isNaN(dateObj.getTime())) {
+                // Force selected year for better consistency
+                dateObj.setFullYear(importYear);
                 dateStr = dateObj.toISOString().split('T')[0];
             }
 
             // Parse Amount (Remove Currency symbols, handle negatives)
             const cleanAmt = amtRaw.replace(/[^0-9.-]/g, '');
-            const amount = parseFloat(cleanAmt) || 0;
+            let amount = parseFloat(cleanAmt) || 0;
+
+            // Invert Sign Logic
+            if (mapConfig.invertSign) {
+                amount = -amount;
+            }
 
             // Auto-categorize
             let category = "Uncategorized";
@@ -105,7 +186,7 @@ export const Importer = () => {
                 description_original: descRaw,
                 description_normalized: descRaw,
                 amount: amount,
-                type: (amount >= 0 ? 'INCOME' : 'EXPENSE') as import('../../types').TransactionType,
+                type: (amount > 0 ? 'INCOME' : 'EXPENSE') as import('../../types').TransactionType,
                 category: category,
                 account_id: selectedAccount,
                 scope: scope, // Assign current scope
@@ -120,34 +201,19 @@ export const Importer = () => {
 
     // --- Step 3: Save ---
     const handleSave = async () => {
-        if (previewData.length === 0) return;
+        // Filter only selected
+        const transactionsToSave = previewData.filter((_, i) => selectedIndices.has(i));
+
+        if (transactionsToSave.length === 0) return alert("No has seleccionado ninguna transacción para importar.");
 
         // Validation: Check for Closed Months
-        // We check unique months involved to minimize DB calls
-        const uniqueMonths = new Set(previewData.map(t => t.date.slice(0, 7))); // YYYY-MM
-        const importScope = scope === 'PERSONAL' ? 'PERSONAL' : 'BUSINESS'; // Explicit scope
+        const uniqueMonths = new Set(transactionsToSave.map(t => t.date.slice(0, 7))); // YYYY-MM
 
-        let blockedMonth = null;
-        for (const monthKey of uniqueMonths) {
-            // Create a date object for the first of that month to check status
-            const [y, m] = monthKey.split('-').map(Number);
-            const checkDate = new Date(y, m - 1, 1);
-
-            // We need to import 'closingService' at the top of the file separately
-            // But since we can't easily add imports in this block, we assume it's available or will add it in a subsequent step if missing.
-            // Actually, best to add the import first. I will add the import in a separate tool call if needed, 
-            // but for now I will assume I can't use it without importing.
-            // Wait, I can't easily async check inside a sync map or simple loop efficiently without the service imported.
-
-            // Let's use the closingService. 
-        }
-
-        // RE-WRITING LOGIC TO BE CLEANER
-        // 1. Get all statuses
         try {
             const statusChecks = Array.from(uniqueMonths).map(async (mKey) => {
                 const [y, m] = mKey.split('-').map(Number);
                 const d = new Date(y, m - 1, 1);
+                // Dynamic import to avoid circular dependency issues if any
                 const status = await import('../../services/ClosingService').then(mod => mod.closingService.getStatus(d, scope));
                 return { mKey, status };
             });
@@ -156,7 +222,7 @@ export const Importer = () => {
             const closed = results.find(r => r.status === 'CLOSED' || r.status === 'LOCKED');
 
             if (closed) {
-                alert(`Error de Integridad:\n\nNo puedes importar transacciones para ${closed.mKey} porque ese mes está CERRADO.\n\nPor favor elimina esas filas del archivo o reabre el mes primero.`);
+                alert(`Error de Integridad:\n\nNo puedes importar transacciones para ${closed.mKey} porque ese mes está CERRADO.\n\nPor favor desmarca esas filas o reabre el mes primero.`);
                 return;
             }
 
@@ -166,14 +232,15 @@ export const Importer = () => {
             return;
         }
 
-        if (window.confirm(`¿Importar ${previewData.length} transacciones?`)) {
-            await db.transactions.bulkAdd(previewData);
+        if (window.confirm(`¿Importar ${transactionsToSave.length} transacciones seleccionadas?`)) {
+            await db.transactions.bulkAdd(transactionsToSave);
             alert("¡Importación exitosa!");
             // Reset
             setStep('UPLOAD');
             setRawText("");
             setParsedMatrix([]);
             setPreviewData([]);
+            setSelectedIndices(new Set());
         }
     };
 
@@ -215,8 +282,8 @@ export const Importer = () => {
 
                         <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50 transition-colors hover:bg-slate-100 hover:border-indigo-400">
                             <FileText className="mx-auto text-slate-400 mb-4" size={48} />
-                            <p className="font-medium text-slate-600 mb-2">Arrastra tu archivo CSV aquí o selecciona</p>
-                            <input type="file" accept=".csv,.txt" className="hidden" id="file-upload" onChange={handleFileUpload} />
+                            <p className="font-medium text-slate-600 mb-2">Arrastra tu archivo (CSV, Texto o <b>Imagen</b>)</p>
+                            <input type="file" accept=".csv,.txt,.jpg,.jpeg,.png,.webp" className="hidden" id="file-upload" onChange={handleFileUpload} />
                             <label htmlFor="file-upload" className="inline-block px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-bold text-indigo-600 cursor-pointer hover:bg-indigo-50">
                                 Explorar Archivos
                             </label>
@@ -240,19 +307,41 @@ export const Importer = () => {
 
                         <button
                             onClick={processRawText}
-                            disabled={!rawText || !selectedAccount}
+                            disabled={!rawText || !selectedAccount || isAnalyzing}
                             className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
                         >
-                            Siguiente: Mapear Columnas <ArrowRight size={18} />
+                            {isAnalyzing ? (
+                                <>
+                                    <Loader2 size={18} className="animate-spin" /> Analizando Imagen (IA)...
+                                </>
+                            ) : (
+                                <>Siguiente: Mapear Columnas <ArrowRight size={18} /></>
+                            )}
                         </button>
                     </div>
                 )}
 
                 {step === 'MAP' && (
                     <div className="space-y-6">
-                        <div className="flex gap-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-800">
-                            <Settings size={20} />
-                            <p>Hemos detectado <b>{parsedMatrix.length}</b> filas y <b>{parsedMatrix[0]?.length}</b> columnas. Por favor indica qué representa cada columna.</p>
+                        <div className="flex gap-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl text-sm text-indigo-800 items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Settings size={20} />
+                                <p>Hemos detectado <b>{parsedMatrix.length}</b> filas.</p>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-600">Año para fechas incompletas:</span>
+                                <select
+                                    className="p-2 border border-indigo-200 rounded-lg bg-white font-bold text-indigo-700"
+                                    value={importYear}
+                                    onChange={(e) => setImportYear(parseInt(e.target.value))}
+                                >
+                                    {Array.from({ length: 5 }).map((_, i) => {
+                                        const y = new Date().getFullYear() - 2 + i; // 2023 to 2027
+                                        return <option key={y} value={y}>{y}</option>
+                                    })}
+                                </select>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-3 gap-6">
@@ -276,9 +365,32 @@ export const Importer = () => {
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2 mb-4">
-                            <input type="checkbox" id="headerRow" checked={mapConfig.headerRow} onChange={e => setMapConfig({ ...mapConfig, headerRow: e.target.checked })} className="w-4 h-4 text-indigo-600 rounded" />
-                            <label htmlFor="headerRow" className="text-sm text-slate-700">La primera fila son encabezados (ignorar)</label>
+
+
+                        <div className="flex items-center gap-6 mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="headerRow"
+                                    checked={mapConfig.headerRow}
+                                    onChange={e => setMapConfig({ ...mapConfig, headerRow: e.target.checked })}
+                                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                />
+                                <label htmlFor="headerRow" className="text-sm font-medium text-slate-700 cursor-pointer">Ignorar primera fila (Encabezados)</label>
+                            </div>
+
+                            <div className="flex items-center gap-2 ml-auto">
+                                <input
+                                    type="checkbox"
+                                    id="invertSign"
+                                    checked={mapConfig.invertSign}
+                                    onChange={e => setMapConfig({ ...mapConfig, invertSign: e.target.checked })}
+                                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                />
+                                <label htmlFor="invertSign" className="text-sm font-bold text-slate-700 cursor-pointer flex items-center gap-1">
+                                    Invertir Signos <span className="text-xs font-normal text-slate-500">(Útil para Tarjetas de Crédito)</span>
+                                </label>
+                            </div>
                         </div>
 
                         {/* Preview Table of first 5 rows */}
@@ -310,54 +422,109 @@ export const Importer = () => {
                             <button onClick={() => setStep('UPLOAD')} className="px-6 py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Atrás</button>
                             <button onClick={generatePreview} className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700">Previsualizar Datos</button>
                         </div>
-                    </div>
+                    </div >
                 )}
 
-                {step === 'PREVIEW' && (
-                    <div className="flex flex-col h-[500px]">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="font-bold text-slate-800">Transacciones a Importar ({previewData.length})</h3>
-                            <button onClick={handleSave} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-700 flex items-center gap-2">
-                                <Save size={18} /> Confirmar e Importar
-                            </button>
-                        </div>
+                {
+                    step === 'PREVIEW' && (
+                        <div className="flex flex-col h-[600px] p-6">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                                <div>
+                                    <h3 className="font-bold text-slate-800 text-lg">Confirmar Transacciones</h3>
+                                    <p className="text-xs text-slate-500">Filtrando: {selectedIndices.size} seleccionadas de {previewData.length} encontradas</p>
+                                </div>
 
-                        <div className="flex-1 overflow-y-auto border rounded-xl">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-slate-50 text-slate-500 sticky top-0">
-                                    <tr>
-                                        <th className="p-3">Fecha</th>
-                                        <th className="p-3">Descripción</th>
-                                        <th className="p-3">Categoría (Auto)</th>
-                                        <th className="p-3 text-right">Monto</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {previewData.map(t => (
-                                        <tr key={t.id} className="hover:bg-slate-50">
-                                            <td className="p-3 text-slate-500 font-mono text-xs">{t.date}</td>
-                                            <td className="p-3 font-medium text-slate-800">{t.description_original}</td>
-                                            <td className="p-3">
-                                                <span className={`px-2 py-1 rounded-md text-xs font-bold ${t.category === 'Uncategorized' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                    {t.category}
-                                                </span>
-                                            </td>
-                                            <td className={`p-3 text-right font-mono font-bold ${t.amount > 0 ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                                {t.amount}
-                                            </td>
+                                <div className="flex items-center gap-3">
+                                    {/* Month Chips */}
+                                    <div className="flex gap-2 bg-slate-100 p-1 rounded-lg">
+                                        <button
+                                            onClick={() => setActiveMonthFilter('ALL')}
+                                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${activeMonthFilter === 'ALL' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}
+                                        >
+                                            Ver Todo
+                                        </button>
+                                        {monthsInImport.map(([m, count]) => (
+                                            <button
+                                                key={m}
+                                                onClick={() => setActiveMonthFilter(m)}
+                                                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-2 ${activeMonthFilter === m ? 'bg-white text-indigo-700 shadow-sm border border-indigo-100' : 'text-slate-500 hover:bg-slate-200'}`}
+                                            >
+                                                {formatMonth(new Date(m + "-02"))}
+                                                <span className="bg-slate-200 text-slate-600 px-1.5 rounded text-[10px]">{count}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <button onClick={handleSave} disabled={selectedIndices.size === 0} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 disabled:grayscale transition-all">
+                                        <Save size={18} /> Importar ({selectedIndices.size})
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50/50">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-50 text-slate-500 sticky top-0 z-10 border-b border-slate-200 uppercase text-xs font-bold tracking-wider">
+                                        <tr>
+                                            <th className="px-4 py-3 w-12 text-center">
+                                                {/* Master Checkbox logic complicated by filters, keeping simple for now */}
+                                                #
+                                            </th>
+                                            <th className="px-4 py-3">Fecha</th>
+                                            <th className="px-4 py-3">Descripción</th>
+                                            <th className="px-4 py-3">Categoría</th>
+                                            <th className="px-4 py-3 text-right">Monto</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="mt-4 flex justify-start">
-                            <button onClick={() => setStep('MAP')} className="text-sm text-slate-500 hover:text-slate-800 underline">Corregir Mapeo</button>
-                        </div>
-                    </div>
-                )}
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                        {previewData.map((t, idx) => {
+                                            // 1. Filter Check
+                                            const monthKey = t.date.slice(0, 7);
+                                            if (activeMonthFilter !== 'ALL' && monthKey !== activeMonthFilter) return null;
 
+                                            const isSelected = selectedIndices.has(idx);
+
+                                            return (
+                                                <tr key={idx} className={`group transition-colors ${isSelected ? 'hover:bg-indigo-50/30' : 'bg-slate-50 opacity-60 grayscale'}`}>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => toggleSelection(idx)}
+                                                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-3 text-slate-500 font-mono text-xs whitespace-nowrap">
+                                                        {t.date}
+                                                        {activeMonthFilter === 'ALL' && (
+                                                            <span className="ml-2 px-1.5 py-0.5 bg-slate-100 border border-slate-200 text-[10px] rounded text-slate-400 font-bold scale-90 inline-block">
+                                                                {monthKey}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className={`px-4 py-3 font-medium text-sm ${isSelected ? 'text-slate-700' : 'text-slate-400'}`}>{t.description_normalized}</td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`px-2 py-1 rounded-md text-xs font-bold ${t.category === 'Uncategorized' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                            {t.category}
+                                                        </span>
+                                                    </td>
+                                                    <td className={`px-4 py-3 text-right font-mono font-bold ${isSelected ? (t.amount > 0 ? 'text-emerald-600' : 'text-slate-800') : 'text-slate-400'}`}>
+                                                        {t.amount}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="mt-4 flex justify-between items-center text-xs text-slate-500">
+                                <button onClick={() => setStep('MAP')} className="hover:text-indigo-600 underline font-bold">Corregir Mapeo</button>
+                                <p>Se importarán solo las filas marcadas.</p>
+                            </div>
+                        </div>
+                    )
+                }
             </div>
-        </div>
+        </div >
     );
 };
 

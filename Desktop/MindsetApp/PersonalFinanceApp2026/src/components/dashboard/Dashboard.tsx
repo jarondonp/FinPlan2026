@@ -43,7 +43,9 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
 
     // Filter Helper
     const isTransactionInTimeframe = (dateStr: string) => {
-        const date = new Date(dateStr);
+        // Fix: Parse manually to avoid UTC offset issues
+        const [y, m, d] = dateStr.split('-').map(Number);
+        const date = new Date(y, m - 1, d); // Local time 00:00:00
         return date >= timeframe.start && date <= timeframe.end;
     };
 

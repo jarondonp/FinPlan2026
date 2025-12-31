@@ -170,7 +170,10 @@ export const Transactions = () => {
                                 return (
                                     <tr key={t.id} className="hover:bg-slate-50/80 transition-colors group">
                                         <td className="px-6 py-4 text-slate-500 whitespace-nowrap font-mono text-xs">
-                                            {new Date(t.date).toLocaleDateString()}
+                                            {(() => {
+                                                const [y, m, d] = t.date.split('-').map(Number);
+                                                return new Date(y, m - 1, d).toLocaleDateString();
+                                            })()}
                                         </td>
                                         <td className="px-6 py-4 font-medium text-slate-900">
                                             <div className="whitespace-normal break-words max-w-sm text-xs" title={t.description_original}>

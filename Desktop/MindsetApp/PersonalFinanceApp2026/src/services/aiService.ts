@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI } from "@google/genai";
+// GoogleGenerativeAI import removed as we are using direct REST fetch for simpler integration
+// import { GoogleGenerativeAI } from "@google/genai";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -51,6 +52,64 @@ export const aiService = {
         } catch (error) {
             console.error("AI Categorization Error:", error);
             return [];
+        }
+    },
+
+    async extractTransactionsFromImage(base64Image: string): Promise<string[][]> {
+        if (!API_KEY) {
+            console.warn("Gemini API Key missing");
+            return [];
+        }
+
+        const prompt = `
+            You are a data extraction engine. Analyze this image of a bank statement or transaction list.
+            Extract the transaction rows into a 2D JSON array (matrix).
+            
+            Columns to extract (in this order):
+            1. Date (YYYY-MM-DD format PREFERRED. If year is missing in text e.g. "Dec 27", assume current year 2025. Return full YYYY-MM-DD).
+            2. Description (Transaction details).
+            3. Amount (Numeric string. Use negative sign '-' for expenses/debits, positive for deposits/credits).
+
+            Rules:
+            - Ignore headers, balances, or unrelated text.
+            - If an expense is shown in parentheses (50.00) or separate debit column, make it negative -50.00.
+            - Return ONLY the JSON matrix: [["2025-12-01", "Netflix", "-15.00"], ["2025-12-02", "Salary", "2000.00"]]
+        `;
+
+        try {
+            // Remove header if present (e.g., "data:image/jpeg;base64,")
+            const cleanBase64 = base64Image.split(',')[1] || base64Image;
+
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            { inline_data: { mime_type: "image/jpeg", data: cleanBase64 } }
+                        ]
+                    }],
+                    generationConfig: { responseMimeType: "application/json" }
+                })
+            });
+
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (!text) {
+                console.error("Gemini Response Error", data);
+                throw new Error("No response from AI Image Analysis");
+            }
+
+            const matrix = JSON.parse(text);
+            if (!Array.isArray(matrix)) throw new Error("AI returned invalid format");
+
+            return matrix;
+
+        } catch (error) {
+            console.error("Image Extraction Error:", error);
+            throw error;
         }
     }
 };
