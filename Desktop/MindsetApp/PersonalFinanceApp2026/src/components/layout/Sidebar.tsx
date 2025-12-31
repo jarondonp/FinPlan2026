@@ -11,11 +11,14 @@ import {
     ChevronRight,
     PieChart,
     Calendar,
-    TrendingUp
+    TrendingUp,
+    Building2,
+    User
 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../db/db";
 import { formatCurrency } from "../../utils";
+import { useScope } from "../../context/ScopeContext";
 // import { DEMO_ACCOUNTS, DEMO_TRANSACTIONS, DEMO_GOALS, DEFAULT_CATEGORIES } from "../../utils";
 // I'll handle demo data loading inside the component for now or move it to utils.
 
@@ -25,7 +28,10 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
+    const { scope } = useScope();
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
 
     const totalBalance = accounts.reduce((acc, curr) => acc + (curr.balance || 0), 0);
 
@@ -50,6 +56,10 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                     <h1 className="font-bold text-lg leading-tight tracking-tight">FinMap</h1>
                     <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Personal AI</p>
                 </div>
+            </div>
+
+            <div className="px-3 mb-4">
+                <ScopeToggle />
             </div>
 
             <nav className="flex-1 px-3 space-y-1">
@@ -92,3 +102,32 @@ const NavItem = ({ icon, label, active, onClick }: any) => (
         {active && <ChevronRight size={14} className="ml-auto opacity-50" />}
     </button>
 );
+
+const ScopeToggle = () => {
+    const { scope, setScope } = useScope();
+
+    return (
+        <div className="bg-slate-800 p-1 rounded-lg flex gap-1">
+            <button
+                onClick={() => setScope('PERSONAL')}
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-medium transition-all ${scope === 'PERSONAL'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                    }`}
+            >
+                <User size={14} />
+                Personal
+            </button>
+            <button
+                onClick={() => setScope('BUSINESS')}
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded-md text-xs font-medium transition-all ${scope === 'BUSINESS'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                    }`}
+            >
+                <Building2 size={14} />
+                Empresa
+            </button>
+        </div>
+    );
+};

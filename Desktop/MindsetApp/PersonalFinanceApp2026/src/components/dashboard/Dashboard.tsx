@@ -2,21 +2,35 @@ import React, { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
+import { useScope } from '../../context/ScopeContext';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity } from 'lucide-react';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
 }
 
 export const Dashboard = ({ onNavigate }: DashboardProps) => {
+    const { scope } = useScope();
+
     // Data Fetching
-    const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
-    const recurringExpenses = useLiveQuery(() => db.recurringExpenses.toArray()) || [];
+    const transactions = useLiveQuery(() => db.transactions
+        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
+        .toArray(), [scope]) || [];
+
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
+
+    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
 
     // State for alert details
     const [expandedAlerts, setExpandedAlerts] = useState<Record<number, boolean>>({});
@@ -82,8 +96,11 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
     return (
-        <div className="p-8 max-w-7xl mx-auto animate-in fade-in duration-500">
-            <h1 className="text-3xl font-bold text-slate-900 mb-8">Dashboard</h1>
+        <div className={`p-8 max-w-7xl mx-auto animate-in fade-in duration-500 ${scope === 'BUSINESS' ? 'bg-slate-50/50 min-h-screen' : ''}`}>
+            <h1 className="text-3xl font-bold text-slate-900 mb-8 flex items-center gap-3">
+                Dashboard
+                {scope === 'BUSINESS' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full uppercase tracking-wider border border-blue-200">Empresa</span>}
+            </h1>
 
             {/* Consistency Alert Area */}
             {consistencyIssues.length > 0 && (
@@ -128,39 +145,90 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                 </div>
             )}
 
-            {/* Top Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                            <DollarSign size={24} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Balance Total</span>
-                    </div>
-                    <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalBalance)}</div>
-                    <div className="text-xs text-slate-500 mt-2">Across {accounts.length} accounts</div>
-                </div>
 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
-                            <ArrowUpRight size={24} />
-                        </div>
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingresos (Mes)</span>
-                    </div>
-                    <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
-                </div>
 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                            <ArrowDownRight size={24} />
+            {/* Business KPI Header */}
+            {scope === 'BUSINESS' && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                                <DollarSign size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cash on Hand</span>
                         </div>
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gastos (Mes)</span>
+                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalBalance)}</div>
                     </div>
-                    <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                                <TrendingUp size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Revenue</span>
+                        </div>
+                        <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                                <Activity size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Burn Rate</span>
+                        </div>
+                        <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                                <Briefcase size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Runway Est.</span>
+                        </div>
+                        <div className="text-3xl font-bold text-indigo-600">
+                            {monthlyStats.expense > 0 ? (totalBalance / monthlyStats.expense).toFixed(1) : "∞"} <span className="text-sm text-slate-400 font-medium">Meses</span>
+                        </div>
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {/* Personal Cards (Hidden if Business) */}
+            {scope === 'PERSONAL' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                                <DollarSign size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Balance Total</span>
+                        </div>
+                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalBalance)}</div>
+                        <div className="text-xs text-slate-500 mt-2">Across {accounts.length} accounts</div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                                <ArrowUpRight size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingresos (Mes)</span>
+                        </div>
+                        <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                                <ArrowDownRight size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gastos (Mes)</span>
+                        </div>
+                        <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 {/* Spending Chart */}

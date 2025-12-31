@@ -4,13 +4,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useScope } from '../../context/ScopeContext';
 
 interface PlanningModuleProps {
     onNavigate: (view: string) => void;
 }
 
 export const PlanningModule = ({ onNavigate }: PlanningModuleProps) => {
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
+    const { scope } = useScope();
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
     const [extraPayment, setExtraPayment] = useState(200);
     const [strategy, setStrategy] = useState<"AVALANCHE" | "SNOWBALL">("AVALANCHE");
 

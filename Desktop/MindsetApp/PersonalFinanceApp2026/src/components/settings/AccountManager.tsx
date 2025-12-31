@@ -4,9 +4,13 @@ import { db } from '../../db/db';
 import { Account, AccountType } from '../../types';
 import { formatCurrency, generateId } from '../../utils';
 import { Wallet, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const AccountManager = () => {
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
+    const { scope } = useScope();
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Account>>({});
 
@@ -23,7 +27,8 @@ export const AccountManager = () => {
                 ...editForm,
                 id: generateId(),
                 balance: editForm.balance || 0,
-                currency: 'USD'
+                currency: 'USD',
+                scope: scope
             } as Account);
         } else {
             await db.accounts.update(editingId!, editForm);

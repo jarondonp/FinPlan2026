@@ -4,12 +4,22 @@ import { db } from '../../db/db';
 import { aiService } from '../../services/aiService';
 import { formatCurrency } from '../../utils';
 import { Search, Sparkles, Trash2, Loader2, Save } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const Transactions = () => {
+    const { scope } = useScope();
     // Queries
-    const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
+    const transactions = useLiveQuery(() => db.transactions
+        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
+        .toArray(), [scope]) || [];
+
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
 
     // Filters
     const [search, setSearch] = useState("");

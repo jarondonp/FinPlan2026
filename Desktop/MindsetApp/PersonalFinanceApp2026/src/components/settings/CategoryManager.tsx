@@ -4,15 +4,19 @@ import { db } from '../../db/db';
 import { CategoryDef } from '../../types';
 import { getRandomColor, formatCurrency } from '../../utils';
 import { Tag, Plus, X, Edit2 } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const CategoryManager = () => {
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
+    const { scope } = useScope();
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
     const [newCategoryName, setNewCategoryName] = useState("");
     const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
 
     const addCategory = async () => {
         if (!newCategoryName || categories.find((c) => c.name === newCategoryName)) return;
-        const newCat: CategoryDef = { name: newCategoryName, color: getRandomColor() };
+        const newCat: CategoryDef = { name: newCategoryName, color: getRandomColor(), scope: scope };
         await db.categories.add(newCat);
         setNewCategoryName("");
     };
@@ -21,6 +25,20 @@ export const CategoryManager = () => {
         if (window.confirm("¿Seguro que deseas eliminar esta categoría? Se desvinculará de las transacciones.")) {
             await db.categories.delete(name);
         }
+    };
+
+    const loadDefaults = async () => {
+        const defaults = scope === 'BUSINESS'
+            ? ["Ventas", "Servicios", "Nómina", "Alquiler", "Marketing", "Software", "Impuestos", "Otros Gastos"]
+            : ["Salario", "Vivienda", "Comida", "Transporte", "Servicios", "Entretenimiento", "Salud", "Ahorro"];
+
+        await db.transaction('rw', db.categories, async () => {
+            for (const name of defaults) {
+                if (!await db.categories.get(name)) {
+                    await db.categories.add({ name, color: getRandomColor(), scope });
+                }
+            }
+        });
     };
 
     const updateCategoryLimit = async (name: string, limit: number) => {
@@ -49,6 +67,11 @@ export const CategoryManager = () => {
                     >
                         <Plus size={18} />
                     </button>
+                    {categories.length === 0 && (
+                        <button onClick={loadDefaults} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold text-xs hover:bg-slate-200 border border-slate-200 whitespace-nowrap">
+                            Cargar {scope === 'BUSINESS' ? 'Empresa' : 'Personales'}
+                        </button>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto">

@@ -4,17 +4,30 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency, getRandomColor, generateId } from '../../utils';
 import { Goal, CategoryDef } from '../../types';
+import { useScope } from '../../context/ScopeContext';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;
 }
 
 export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
+    const { scope } = useScope();
     // Data Fetching
-    const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
-    const goals = useLiveQuery(() => db.goals.toArray()) || [];
-    const recurringExpenses = useLiveQuery(() => db.recurringExpenses.toArray()) || [];
+    const transactions = useLiveQuery(() => db.transactions
+        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
+
+    const goals = useLiveQuery(() => db.goals
+        .filter(g => g.scope === scope || (scope === 'PERSONAL' && !g.scope))
+        .toArray(), [scope]) || [];
+
+    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
 
     // State
     const [isAddingGoal, setIsAddingGoal] = useState(false);

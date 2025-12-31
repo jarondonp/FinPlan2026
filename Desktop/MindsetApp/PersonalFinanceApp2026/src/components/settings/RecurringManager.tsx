@@ -4,11 +4,21 @@ import { db } from '../../db/db';
 import { IncomeSource, RecurringExpense } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
 import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const RecurringManager = () => {
-    const incomes = useLiveQuery(() => db.incomeSources.toArray()) || [];
-    const expenses = useLiveQuery(() => db.recurringExpenses.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
+    const { scope } = useScope();
+    const incomes = useLiveQuery(() => db.incomeSources
+        .filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope))
+        .toArray(), [scope]) || [];
+
+    const expenses = useLiveQuery(() => db.recurringExpenses
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
 
     const [newIncome, setNewIncome] = useState<Partial<IncomeSource>>({ frequency: 'MONTHLY' });
     const [newExpense, setNewExpense] = useState<Partial<RecurringExpense>>({ active: true, autoPay: false });
@@ -46,7 +56,8 @@ export const RecurringManager = () => {
             id: generateId(),
             amount: parseFloat(newIncome.amount.toString()),
             payDay1: parseInt(newIncome.payDay1.toString()),
-            payDay2: newIncome.frequency === 'BIWEEKLY' ? (newIncome.payDay2 ? parseInt(newIncome.payDay2.toString()) : parseInt(newIncome.payDay1.toString()) + 15) : undefined
+            payDay2: newIncome.frequency === 'BIWEEKLY' ? (newIncome.payDay2 ? parseInt(newIncome.payDay2.toString()) : parseInt(newIncome.payDay1.toString()) + 15) : undefined,
+            scope: scope
         } as IncomeSource);
         setNewIncome({ frequency: 'MONTHLY' });
     };
@@ -70,7 +81,8 @@ export const RecurringManager = () => {
             ...newExpense,
             id: generateId(),
             amount: amount,
-            dueDay: parseInt(newExpense.dueDay.toString())
+            dueDay: parseInt(newExpense.dueDay.toString()),
+            scope: scope
         } as RecurringExpense);
         setNewExpense({ active: true, autoPay: false });
     };

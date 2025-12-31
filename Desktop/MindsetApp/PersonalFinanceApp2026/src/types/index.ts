@@ -1,5 +1,6 @@
 export type TransactionType = "INCOME" | "EXPENSE" | "TRANSFER";
 export type AccountType = "Checking" | "Credit Card" | "Savings" | "Loan" | "Investment";
+export type Scope = 'PERSONAL' | 'BUSINESS';
 
 export interface Transaction {
   id: string;
@@ -13,6 +14,7 @@ export interface Transaction {
   account_id: string;
   is_duplicate: boolean;
   needs_review: boolean;
+  scope?: Scope;
 }
 
 export interface Account {
@@ -28,6 +30,7 @@ export interface Account {
   closingDay?: number;   // Day of month (1-31)
   dueDay?: number;       // Day of month (1-31)
   minPayment?: number;   // For Loans/CC
+  scope?: Scope;
 }
 
 export interface Goal {
@@ -38,6 +41,7 @@ export interface Goal {
   deadline: string; // ISO Date YYYY-MM-DD
   icon: string;
   color: string;
+  scope?: Scope;
 }
 
 export interface Rule {
@@ -46,6 +50,7 @@ export interface Rule {
   matchType: "contains" | "exact" | "starts_with";
   category: string;
   active: boolean;
+  scope?: Scope;
 }
 
 export interface CategoryDef {
@@ -53,6 +58,7 @@ export interface CategoryDef {
   color: string;
   budgetLimit?: number; // Monthly budget limit
   isHidden?: boolean;   // If true, hidden from budget view
+  scope?: Scope;
 }
 
 // --- Phase 2: Cashflow Foundation ---
@@ -64,6 +70,7 @@ export interface IncomeSource {
   frequency: 'MONTHLY' | 'BIWEEKLY';
   payDay1: number; // 1-31
   payDay2?: number; // If Bi-weekly (usually +15 days from day1)
+  scope?: Scope;
 }
 
 export interface RecurringExpense {
@@ -74,4 +81,5 @@ export interface RecurringExpense {
   category: string;
   active: boolean;
   autoPay: boolean; // If true, funds deducted automatically
+  scope?: Scope;
 }

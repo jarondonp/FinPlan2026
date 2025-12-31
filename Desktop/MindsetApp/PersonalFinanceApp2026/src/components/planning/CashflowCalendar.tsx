@@ -4,13 +4,26 @@ import { db } from '../../db/db';
 import { calculateDailyBalances, DailyBalance } from '../../utils/cashflowLogic';
 import { formatCurrency } from '../../utils';
 import { ChevronLeft, ChevronRight, AlertCircle, TrendingUp, Calendar as CalIcon, Flame, CreditCard } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const CashflowCalendar = () => {
+    const { scope } = useScope();
     // Data Fetching
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const incomes = useLiveQuery(() => db.incomeSources.toArray()) || [];
-    const expenses = useLiveQuery(() => db.recurringExpenses.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
+
+    const incomes = useLiveQuery(() => db.incomeSources
+        .filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope))
+        .toArray(), [scope]) || [];
+
+    const expenses = useLiveQuery(() => db.recurringExpenses
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
 
     // Calculate Initial Liquid Balance (Checking + Savings usually, but let's stick to Checking for 'Spendable')
     const initialBalance = useMemo(() => {
@@ -21,8 +34,8 @@ export const CashflowCalendar = () => {
 
     const projectionDays = 60;
     const dailyBalances = useMemo(() => {
-        return calculateDailyBalances(initialBalance, projectionDays, incomes, expenses, categories, accounts);
-    }, [initialBalance, incomes, expenses, categories, accounts]);
+        return calculateDailyBalances(initialBalance, projectionDays, incomes, expenses, categories, accounts, scope);
+    }, [initialBalance, incomes, expenses, categories, accounts, scope]);
 
     // Calendar View Logic
     const [viewDate, setViewDate] = useState(new Date());

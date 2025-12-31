@@ -5,12 +5,18 @@ import { Transaction } from '../../types';
 import { generateId } from '../../utils';
 import { parseCSV } from '../../utils/csvParser';
 import { Upload, CheckCircle, ArrowRight, Loader2, FileText, Settings, AlertCircle, Save } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 type ImportStep = 'UPLOAD' | 'MAP' | 'PREVIEW';
 
 export const Importer = () => {
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const rules = useLiveQuery(() => db.rules.toArray()) || [];
+    const { scope } = useScope();
+    const accounts = useLiveQuery(() => db.accounts
+        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
+        .toArray(), [scope]) || [];
+    const rules = useLiveQuery(() => db.rules
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
 
     // State
     const [step, setStep] = useState<ImportStep>('UPLOAD');
@@ -99,9 +105,10 @@ export const Importer = () => {
                 description_original: descRaw,
                 description_normalized: descRaw,
                 amount: amount,
-                type: amount >= 0 ? 'INCOME' : 'EXPENSE',
+                type: (amount >= 0 ? 'INCOME' : 'EXPENSE') as import('../../types').TransactionType,
                 category: category,
                 account_id: selectedAccount,
+                scope: scope, // Assign current scope
                 is_duplicate: false,
                 needs_review: !matchedRule
             };

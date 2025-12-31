@@ -1,4 +1,4 @@
-import { IncomeSource, RecurringExpense, CategoryDef, Account } from "../types";
+import { IncomeSource, RecurringExpense, CategoryDef, Account, Scope } from "../types";
 
 export interface DailyBalance {
     date: Date;
@@ -16,7 +16,8 @@ export const calculateDailyBalances = (
     incomes: IncomeSource[],
     expenses: RecurringExpense[],
     categories: CategoryDef[],
-    accounts: Account[]
+    accounts: Account[],
+    scope: Scope
 ): DailyBalance[] => {
     const result: DailyBalance[] = [];
     let currentBalance = initialBalance;
@@ -36,6 +37,9 @@ export const calculateDailyBalances = (
             const variablePart = Math.max(0, catLimit - catFixed);
             return total + (variablePart / 30);
         }, 0);
+
+    // If BUSINESS, ignore estimated daily burn (focus on known bills/invoices)
+    const effectiveBurnRate = scope === 'BUSINESS' ? 0 : dailyBurnRate;
 
     for (let i = 0; i < daysToProject; i++) {
         const currentDate = new Date(today);
@@ -63,13 +67,13 @@ export const calculateDailyBalances = (
         }).map(acc => ({ name: `Pago Mínimo ${acc.name}`, amount: acc.minPayment || 0, type: 'debt' as const }));
 
         // Burn Rate Expense
-        const safeBurnRate = dailyBurnRate > 0 ? [{ name: "Gastos Variables Est.", amount: dailyBurnRate, type: 'variable' as const }] : [];
+        const safeBurnRate = effectiveBurnRate > 0 ? [{ name: "Gastos Variables Est.", amount: effectiveBurnRate, type: 'variable' as const }] : [];
 
         // Totals
         const totalIncome = dayIncomes.reduce((sum, item) => sum + item.amount, 0);
         const totalFixed = dayFixedExpenses.reduce((sum, item) => sum + item.amount, 0);
         const totalDebt = dayDebtPayments.reduce((sum, item) => sum + item.amount, 0);
-        const totalBurn = dailyBurnRate;
+        const totalBurn = effectiveBurnRate;
 
         const startBalance = currentBalance;
         currentBalance = currentBalance + totalIncome - (totalFixed + totalDebt + totalBurn);

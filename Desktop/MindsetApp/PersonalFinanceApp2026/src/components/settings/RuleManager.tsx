@@ -4,15 +4,22 @@ import { db } from '../../db/db';
 import { Rule } from '../../types';
 import { generateId } from '../../utils';
 import { BrainCircuit, X, Plus } from 'lucide-react';
+import { useScope } from '../../context/ScopeContext';
 
 export const RuleManager = () => {
-    const rules = useLiveQuery(() => db.rules.toArray()) || [];
-    const categories = useLiveQuery(() => db.categories.toArray()) || [];
+    const { scope } = useScope();
+    const rules = useLiveQuery(() => db.rules
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
+
+    const categories = useLiveQuery(() => db.categories
+        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
+        .toArray(), [scope]) || [];
     const [newRule, setNewRule] = useState<Partial<Rule>>({ matchType: "contains", active: true });
 
     const addRule = async () => {
         if (!newRule.pattern || !newRule.category) return;
-        await db.rules.add({ ...newRule, id: generateId() } as Rule);
+        await db.rules.add({ ...newRule, id: generateId(), scope: scope } as Rule);
         setNewRule({ matchType: "contains", active: true, category: categories[0]?.name, pattern: "" });
     };
 

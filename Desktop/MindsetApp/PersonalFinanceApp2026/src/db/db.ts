@@ -14,14 +14,14 @@ export class FinMapDB extends Dexie {
 
     constructor() {
         super('FinMapDB');
-        this.version(2).stores({
-            transactions: 'id, date, type, category, account_id',
-            accounts: 'id, type',
-            goals: 'id',
-            rules: 'id',
-            categories: 'name',
-            incomeSources: 'id',
-            recurringExpenses: 'id, category'
+        this.version(3).stores({
+            transactions: 'id, date, type, category, account_id, scope',
+            accounts: 'id, type, scope',
+            goals: 'id, scope',
+            rules: 'id, scope',
+            categories: 'name, scope',
+            incomeSources: 'id, scope',
+            recurringExpenses: 'id, category, scope'
         });
     }
 
