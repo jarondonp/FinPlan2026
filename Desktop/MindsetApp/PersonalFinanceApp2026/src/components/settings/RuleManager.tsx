@@ -4,7 +4,7 @@ import { db } from '../../db/db';
 import { Rule } from '../../types';
 import { generateId } from '../../utils';
 import { BrainCircuit, X, Plus } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 export const RuleManager = () => {
     const { scope } = useScope();

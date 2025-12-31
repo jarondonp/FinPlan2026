@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 interface PlanningModuleProps {
     onNavigate: (view: string) => void;

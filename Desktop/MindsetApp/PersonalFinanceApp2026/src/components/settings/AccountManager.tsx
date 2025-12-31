@@ -4,7 +4,7 @@ import { db } from '../../db/db';
 import { Account, AccountType } from '../../types';
 import { formatCurrency, generateId } from '../../utils';
 import { Wallet, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 export const AccountManager = () => {
     const { scope } = useScope();

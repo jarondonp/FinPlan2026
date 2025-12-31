@@ -2,18 +2,19 @@ import React, { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
-import { useScope } from '../../context/ScopeContext';
+import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard } from 'lucide-react';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
 }
 
 export const Dashboard = ({ onNavigate }: DashboardProps) => {
-    const { scope } = useScope();
+    const { filterState } = useGlobalFilter();
+    const { scope, timeframe, selectedAccountIds } = filterState;
 
     // Data Fetching
     const transactions = useLiveQuery(() => db.transactions
@@ -39,21 +40,42 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         setExpandedAlerts(prev => ({ ...prev, [idx]: !prev[idx] }));
     };
 
+    // Filter Helper
+    const isTransactionInTimeframe = (dateStr: string) => {
+        const date = new Date(dateStr);
+        return date >= timeframe.start && date <= timeframe.end;
+    };
+
     // Financial Overview
-    const totalBalance = accounts.reduce((sum, a) => sum + (a.balance || 0), 0);
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
+    // Filter accounts if specific accounts are selected
+    const activeAccounts = selectedAccountIds.length > 0
+        ? accounts.filter(a => selectedAccountIds.includes(a.id))
+        : accounts;
+
+    const { totalLiquidity, totalDebt } = activeAccounts.reduce((acc, a) => {
+        const isLiability = a.type === 'Credit Card' || a.type === 'Loan';
+        if (isLiability) {
+            acc.totalDebt += (a.balance || 0);
+        } else {
+            acc.totalLiquidity += (a.balance || 0);
+        }
+        return acc;
+    }, { totalLiquidity: 0, totalDebt: 0 });
 
     const monthlyStats = useMemo(() => {
         return transactions.reduce((stats, t) => {
-            const tDate = new Date(t.date);
-            if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) {
-                if (t.type === 'INCOME') stats.income += t.amount;
-                if (t.type === 'EXPENSE') stats.expense += Math.abs(t.amount);
-            }
+            // Check Timeframe
+            if (!isTransactionInTimeframe(t.date)) return stats;
+
+            // Check Account Filter
+            if (selectedAccountIds.length > 0 && !selectedAccountIds.includes(t.account_id)) return stats;
+
+            if (t.type === 'INCOME') stats.income += t.amount;
+            if (t.type === 'EXPENSE') stats.expense += Math.abs(t.amount);
+
             return stats;
         }, { income: 0, expense: 0 });
-    }, [transactions, currentMonth, currentYear]);
+    }, [transactions, timeframe, selectedAccountIds]);
 
     // Financial Health / Consistency Check
     const consistencyIssues = useMemo(() => {
@@ -82,8 +104,11 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     const spendingByCategory = useMemo(() => {
         const map: Record<string, number> = {};
         transactions
-            .filter(t => t.type === 'EXPENSE' && new Date(t.date).getMonth() === currentMonth)
             .forEach(t => {
+                if (t.type !== 'EXPENSE') return;
+                if (!isTransactionInTimeframe(t.date)) return;
+                if (selectedAccountIds.length > 0 && !selectedAccountIds.includes(t.account_id)) return;
+
                 map[t.category] = (map[t.category] || 0) + Math.abs(t.amount);
             });
 
@@ -91,7 +116,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
             .map(([name, value]) => ({ name, value }))
             .sort((a, b) => b.value - a.value)
             .slice(0, 5); // Top 5
-    }, [transactions, currentMonth]);
+    }, [transactions, timeframe, selectedAccountIds]);
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
@@ -155,9 +180,10 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                             <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
                                 <DollarSign size={24} />
                             </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cash on Hand</span>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Liquidez (Cash)</span>
                         </div>
-                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalBalance)}</div>
+                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
+                        <div className="text-xs text-slate-500 mt-1">Deuda: <span className="text-rose-600 font-bold">{formatCurrency(totalDebt)}</span></div>
                     </div>
 
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -188,7 +214,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Runway Est.</span>
                         </div>
                         <div className="text-3xl font-bold text-indigo-600">
-                            {monthlyStats.expense > 0 ? (totalBalance / monthlyStats.expense).toFixed(1) : "∞"} <span className="text-sm text-slate-400 font-medium">Meses</span>
+                            {monthlyStats.expense > 0 ? (totalLiquidity / monthlyStats.expense).toFixed(1) : "∞"} <span className="text-sm text-slate-400 font-medium">Meses</span>
                         </div>
                     </div>
                 </div>
@@ -196,16 +222,25 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
 
             {/* Personal Cards (Hidden if Business) */}
             {scope === 'PERSONAL' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                                 <DollarSign size={24} />
                             </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Balance Total</span>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Liquidez</span>
                         </div>
-                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalBalance)}</div>
-                        <div className="text-xs text-slate-500 mt-2">Across {accounts.length} accounts</div>
+                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                                <CreditCard size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Deuda Total</span>
+                        </div>
+                        <div className="text-3xl font-bold text-rose-600">{formatCurrency(totalDebt)}</div>
                     </div>
 
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -267,6 +302,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                     <h3 className="font-bold text-slate-800 mb-6">Transacciones Recientes</h3>
                     <div className="divide-y divide-slate-100">
                         {transactions
+                            .filter(t => selectedAccountIds.length === 0 || selectedAccountIds.includes(t.account_id))
                             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                             .slice(0, 5)
                             .map(t => (

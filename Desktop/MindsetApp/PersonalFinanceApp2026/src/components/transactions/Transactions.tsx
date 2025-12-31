@@ -4,10 +4,11 @@ import { db } from '../../db/db';
 import { aiService } from '../../services/aiService';
 import { formatCurrency } from '../../utils';
 import { Search, Sparkles, Trash2, Loader2, Save } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useGlobalFilter } from '../../context/GlobalFilterContext';
 
 export const Transactions = () => {
-    const { scope } = useScope();
+    const { filterState } = useGlobalFilter();
+    const { scope, selectedAccountIds, timeframe } = filterState;
     // Queries
     const transactions = useLiveQuery(() => db.transactions
         .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
@@ -29,14 +30,30 @@ export const Transactions = () => {
     const [isCategorizing, setIsCategorizing] = useState(false);
 
     // Filter Logic
+    // const { filterState } = useScope(); // REMOVED: Already destructured at top
+    // const { selectedAccountIds, timeframe } = filterState; // Used from top scope or destructured here if not at top
+
+    // Filter Logic
+
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
+            // 1. Search Filter
             const matchesSearch = t.description_original.toLowerCase().includes(search.toLowerCase()) ||
                 t.description_normalized.toLowerCase().includes(search.toLowerCase());
+
+            // 2. Category Filter
             const matchesCategory = filterCategory === "ALL" || t.category === filterCategory;
-            return matchesSearch && matchesCategory;
+
+            // 3. Timeframe Filter
+            const tDate = new Date(t.date);
+            const matchesTimeframe = tDate >= timeframe.start && tDate <= timeframe.end;
+
+            // 4. Account Filter
+            const matchesAccount = selectedAccountIds.length === 0 || selectedAccountIds.includes(t.account_id);
+
+            return matchesSearch && matchesCategory && matchesTimeframe && matchesAccount;
         }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [transactions, search, filterCategory]);
+    }, [transactions, search, filterCategory, timeframe, selectedAccountIds]);
 
 
     // Handlers

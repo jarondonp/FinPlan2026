@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency, getRandomColor, generateId } from '../../utils';
 import { Goal, CategoryDef } from '../../types';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;

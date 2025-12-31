@@ -5,7 +5,7 @@ import { Transaction } from '../../types';
 import { generateId } from '../../utils';
 import { parseCSV } from '../../utils/csvParser';
 import { Upload, CheckCircle, ArrowRight, Loader2, FileText, Settings, AlertCircle, Save } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 type ImportStep = 'UPLOAD' | 'MAP' | 'PREVIEW';
 

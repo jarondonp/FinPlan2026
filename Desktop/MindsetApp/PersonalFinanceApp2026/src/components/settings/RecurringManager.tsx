@@ -4,7 +4,7 @@ import { db } from '../../db/db';
 import { IncomeSource, RecurringExpense } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
 import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 export const RecurringManager = () => {
     const { scope } = useScope();

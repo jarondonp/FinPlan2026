@@ -4,7 +4,7 @@ import { db } from '../../db/db';
 import { calculateDailyBalances, DailyBalance } from '../../utils/cashflowLogic';
 import { formatCurrency } from '../../utils';
 import { ChevronLeft, ChevronRight, AlertCircle, TrendingUp, Calendar as CalIcon, Flame, CreditCard } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 export const CashflowCalendar = () => {
     const { scope } = useScope();

@@ -4,7 +4,7 @@ import { db } from '../../db/db';
 import { CategoryDef } from '../../types';
 import { getRandomColor, formatCurrency } from '../../utils';
 import { Tag, Plus, X, Edit2 } from 'lucide-react';
-import { useScope } from '../../context/ScopeContext';
+import { useScope } from '../../context/GlobalFilterContext';
 
 export const CategoryManager = () => {
     const { scope } = useScope();

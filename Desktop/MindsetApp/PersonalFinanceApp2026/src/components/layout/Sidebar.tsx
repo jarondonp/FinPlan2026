@@ -18,7 +18,7 @@ import {
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../db/db";
 import { formatCurrency } from "../../utils";
-import { useScope } from "../../context/ScopeContext";
+import { useScope } from '../../context/GlobalFilterContext';
 // import { DEMO_ACCOUNTS, DEMO_TRANSACTIONS, DEMO_GOALS, DEFAULT_CATEGORIES } from "../../utils";
 // I'll handle demo data loading inside the component for now or move it to utils.
 
@@ -33,7 +33,10 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
         .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
         .toArray(), [scope]) || [];
 
-    const totalBalance = accounts.reduce((acc, curr) => acc + (curr.balance || 0), 0);
+    const totalBalance = accounts.reduce((acc, curr) => {
+        const isLiability = curr.type === 'Credit Card' || curr.type === 'Loan';
+        return acc + (isLiability ? -(curr.balance || 0) : (curr.balance || 0));
+    }, 0);
 
     const loadDemoData = async () => {
         if (window.confirm("Esto reemplazará tus datos actuales con datos de demostración. ¿Continuar?")) {
@@ -73,17 +76,44 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                 <NavItem icon={<Settings size={18} />} label="Configuración" active={currentView === "settings"} onClick={() => onNavigate("settings")} />
             </nav>
 
-            <div className="p-4 border-t border-slate-800">
-                <div className="bg-slate-800 rounded-lg p-4 mb-4">
-                    <p className="text-xs text-slate-400 mb-2">Total Balance</p>
-                    <p className="text-xl font-bold text-white">
-                        {formatCurrency(totalBalance)}
-                    </p>
+            <div className="p-4 border-t border-slate-800 space-y-3">
+                {/* Financial Summary */}
+                <div className="bg-slate-800 rounded-lg p-3 space-y-3">
+
+                    {/* Assets */}
+                    <div className="flex justify-between items-center">
+                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Liquidez</div>
+                        <div className="font-bold text-emerald-400">
+                            {formatCurrency(accounts
+                                .filter(a => !['Credit Card', 'Loan'].includes(a.type))
+                                .reduce((sum, a) => sum + (a.balance || 0), 0)
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Debt */}
+                    <div className="flex justify-between items-center border-t border-slate-700/50 pt-2">
+                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Deuda Total</div>
+                        <div className="font-bold text-rose-400">
+                            {formatCurrency(accounts
+                                .filter(a => ['Credit Card', 'Loan'].includes(a.type))
+                                .reduce((sum, a) => sum + (a.balance || 0), 0)
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Credit Available (Only for CCs) */}
+                    <div className="flex justify-between items-center border-t border-slate-700/50 pt-2">
+                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Disponible TDC</div>
+                        <div className="font-bold text-blue-400">
+                            {formatCurrency(accounts
+                                .filter(a => a.type === 'Credit Card')
+                                .reduce((sum, a) => sum + Math.max(0, (a.limit || 0) - (a.balance || 0)), 0)
+                            )}
+                        </div>
+                    </div>
+
                 </div>
-                {/* Helper for demo data - to be fully implemented in utils */}
-                {/* <button onClick={loadDemoData} className="w-full flex items-center justify-center gap-2 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-slate-800 py-2.5 rounded-lg transition-all border border-transparent hover:border-slate-700">
-          <RefreshCw size={12} /> Cargar Demo
-        </button> */}
             </div>
         </aside>
     );

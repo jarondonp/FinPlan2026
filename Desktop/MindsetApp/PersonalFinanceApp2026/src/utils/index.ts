@@ -40,3 +40,16 @@ export const DEFAULT_CATEGORIES = [
     { name: "Transfer", color: "bg-gray-100 text-gray-700" },
     { name: "Uncategorized", color: "bg-slate-100 text-slate-600" },
 ];
+
+export const getStartOfMonth = (date: Date = new Date()) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+export const getEndOfMonth = (date: Date = new Date()) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+};
+
+export const formatMonth = (date: Date) => {
+    return date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+};
+

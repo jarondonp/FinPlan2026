@@ -2,6 +2,23 @@ export type TransactionType = "INCOME" | "EXPENSE" | "TRANSFER";
 export type AccountType = "Checking" | "Credit Card" | "Savings" | "Loan" | "Investment";
 export type Scope = 'PERSONAL' | 'BUSINESS';
 
+export type TimeframeMode = 'MONTHLY' | 'QUARTERLY' | 'CUSTOM' | 'ANNUAL';
+
+export interface Timeframe {
+  mode: TimeframeMode;
+  start: Date;
+  end: Date;
+  label: string; // e.g. "January 2026"
+}
+
+export interface FilterState {
+  scope: Scope;
+  timeframe: Timeframe;
+  selectedAccountIds: string[]; // Empty means ALL accounts in scope
+  comparisonMode: boolean;
+}
+
+
 export interface Transaction {
   id: string;
   date: string;
