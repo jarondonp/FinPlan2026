@@ -7,7 +7,9 @@ import { parseCSV } from '../../utils/csvParser';
 import { Upload, CheckCircle, ArrowRight, Loader2, FileText, Settings, AlertCircle, Save } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
 
-type ImportStep = 'UPLOAD' | 'MAP' | 'PREVIEW';
+import { detectConflicts, Conflict } from '../../utils/reconciliationUtils';
+
+type ImportStep = 'UPLOAD' | 'MAP' | 'PREVIEW' | 'RESOLVE';
 
 export const Importer = () => {
     const { scope } = useScope();
@@ -42,6 +44,12 @@ export const Importer = () => {
     const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
     const [activeMonthFilter, setActiveMonthFilter] = useState<string>('ALL');
 
+    // --- Reconciliation State ---
+    const [conflicts, setConflicts] = useState<Conflict[]>([]);
+    const [safeTransactions, setSafeTransactions] = useState<Transaction[]>([]);
+    const [resolvedConflicts, setResolvedConflicts] = useState<Transaction[]>([]); // User decisions
+
+
     // Auto-select all on data load
     React.useEffect(() => {
         if (previewData.length > 0) {
@@ -67,7 +75,9 @@ export const Importer = () => {
     };
 
     // --- Step 1: Upload / Parse ---
-    const [isAnalyzing, setIsAnalyzing] = useState(false); // New state
+    // --- Step 1: Upload / Parse ---
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false); // New state for saving
 
     // --- Step 1: Upload / Parse ---
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -200,11 +210,49 @@ export const Importer = () => {
     };
 
     // --- Step 3: Save ---
-    const handleSave = async () => {
+    // --- Step 3: Analyze & Save ---
+    const handleAnalyze = async () => {
         // Filter only selected
-        const transactionsToSave = previewData.filter((_, i) => selectedIndices.has(i));
+        const transactionsToProcess = previewData.filter((_, i) => selectedIndices.has(i));
 
-        if (transactionsToSave.length === 0) return alert("No has seleccionado ninguna transacción para importar.");
+        if (transactionsToProcess.length === 0) return alert("No has seleccionado ninguna transacción para importar.");
+
+        // 1. Fetch Existing Data for Duplicate Detection
+        // Sort dates to find range
+        const dates = transactionsToProcess.map(t => t.date);
+        dates.sort();
+        const minDate = dates[0];
+        const maxDate = dates[dates.length - 1];
+
+        // Fetch from DB (Buffer +/- 2 days is handled in util, but here we just fetch exact range + buffer to be safe)
+        // Actually, dexie 'between' is exact. Let's fetch a bit wider or just filter in JS if dataset is small.
+        // Optimally:
+        const lowerBound = new Date(minDate); lowerBound.setDate(lowerBound.getDate() - 5);
+        const upperBound = new Date(maxDate); upperBound.setDate(upperBound.getDate() + 5);
+
+        const existing = await db.transactions
+            .where('date')
+            .between(lowerBound.toISOString().split('T')[0], upperBound.toISOString().split('T')[0], true, true)
+            .filter(t => t.account_id === selectedAccount)
+            .toArray();
+
+        // 2. Detect
+        const { unique, conflicts } = detectConflicts(transactionsToProcess, existing);
+
+        setSafeTransactions(unique);
+
+        if (conflicts.length > 0) {
+            setConflicts(conflicts);
+            setResolvedConflicts([]); // Reset decisions
+            setStep('RESOLVE');
+        } else {
+            // No conflicts, proceed to save directly
+            await finalSave(unique);
+        }
+    };
+
+    const finalSave = async (transactionsToSave: Transaction[]) => {
+        if (transactionsToSave.length === 0) return alert("No hay transacciones para guardar.");
 
         // Validation: Check for Closed Months
         const uniqueMonths = new Set(transactionsToSave.map(t => t.date.slice(0, 7))); // YYYY-MM
@@ -232,16 +280,47 @@ export const Importer = () => {
             return;
         }
 
-        if (window.confirm(`¿Importar ${transactionsToSave.length} transacciones seleccionadas?`)) {
-            await db.transactions.bulkAdd(transactionsToSave);
-            alert("¡Importación exitosa!");
-            // Reset
-            setStep('UPLOAD');
-            setRawText("");
-            setParsedMatrix([]);
-            setPreviewData([]);
-            setSelectedIndices(new Set());
+        if (window.confirm(`¿Confirmar importación de ${transactionsToSave.length} transacciones?`)) {
+            setIsSaving(true);
+            try {
+                await db.transactions.bulkAdd(transactionsToSave);
+                alert("¡Importación exitosa!");
+                // Reset
+                setStep('UPLOAD');
+                setRawText("");
+                setParsedMatrix([]);
+                setPreviewData([]);
+                setSelectedIndices(new Set());
+                setConflicts([]);
+                setSafeTransactions([]);
+            } finally {
+                setIsSaving(false);
+            }
         }
+    };
+
+    const resolveConflict = (conflictIndex: number, action: 'SKIP' | 'KEEP') => {
+        const conflict = conflicts[conflictIndex];
+        const newConflicts = [...conflicts];
+
+        // Remove from list
+        newConflicts.splice(conflictIndex, 1);
+        setConflicts(newConflicts);
+
+        if (action === 'KEEP') {
+            // Mark as potential duplicate but keep it
+            const t = { ...conflict.incoming, is_duplicate: true, needs_review: true };
+            setResolvedConflicts([...resolvedConflicts, t]);
+        }
+        // If SKIP, we just drop it.
+    };
+
+    const resolveAll = (action: 'SKIP' | 'KEEP') => {
+        if (action === 'KEEP') {
+            const kept = conflicts.map(c => ({ ...c.incoming, is_duplicate: true, needs_review: true }));
+            setResolvedConflicts([...resolvedConflicts, ...kept]);
+        }
+        setConflicts([]);
     };
 
     // --- Renders ---
@@ -261,6 +340,8 @@ export const Importer = () => {
                     <StepBadge step="MAP" current={step} number={2} label="Mapear Columnas" />
                     <div className="w-8 h-0.5 bg-slate-200"></div>
                     <StepBadge step="PREVIEW" current={step} number={3} label="Confirmar" />
+                    <div className="w-8 h-0.5 bg-slate-200"></div>
+                    <StepBadge step="RESOLVE" current={step} number={4} label="Resolver" />
                 </div>
             </header>
 
@@ -455,8 +536,16 @@ export const Importer = () => {
                                         ))}
                                     </div>
 
-                                    <button onClick={handleSave} disabled={selectedIndices.size === 0} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 disabled:grayscale transition-all">
-                                        <Save size={18} /> Importar ({selectedIndices.size})
+                                    <button onClick={handleAnalyze} disabled={selectedIndices.size === 0 || isAnalyzing} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 disabled:grayscale transition-all">
+                                        {isAnalyzing ? (
+                                            <>
+                                                <Loader2 size={18} className="animate-spin" /> Analizando...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save size={18} /> Importar ({selectedIndices.size})
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             </div>
@@ -523,6 +612,104 @@ export const Importer = () => {
                         </div>
                     )
                 }
+
+                {
+                    step === 'RESOLVE' && (
+                        <div className="max-w-4xl mx-auto space-y-6">
+                            <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl">
+                                <div className="flex items-start gap-4">
+                                    <div className="p-3 bg-amber-100 text-amber-600 rounded-full">
+                                        <AlertCircle size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h3 className="text-xl font-bold text-amber-800 mb-2">Conflictos Detectados</h3>
+                                        <p className="text-amber-700 mb-4">
+                                            Hemos encontrado <b>{conflicts.length}</b> transacciones que parecen ya existir en tu base de datos.
+                                            Revisa cada una para evitar duplicados.
+                                        </p>
+
+                                        <div className="flex gap-3">
+                                            <button onClick={() => resolveAll('SKIP')} className="px-4 py-2 bg-white border border-amber-300 shadow-sm rounded-lg text-amber-800 font-bold text-sm hover:bg-amber-50">
+                                                Omitir Todos (Recomendado)
+                                            </button>
+                                            <button onClick={() => resolveAll('KEEP')} className="px-4 py-2 bg-amber-200 border border-amber-300 shadow-sm rounded-lg text-amber-900 font-bold text-sm hover:bg-amber-300">
+                                                Importar Todo (Duplicar)
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                {conflicts.map((c, idx) => (
+                                    <div key={idx} className="bg-white border-2 border-slate-100 rounded-xl p-4 flex items-center gap-4 hover:border-indigo-100 transition-colors">
+                                        <div className="flex-1 space-y-2">
+                                            <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                                <span>Entrante (Nuevo)</span>
+                                            </div>
+                                            <div className="flex justify-between items-center bg-indigo-50 p-3 rounded-lg border border-indigo-100">
+                                                <div>
+                                                    <p className="font-bold text-slate-800">{c.incoming.description_original}</p>
+                                                    <p className="text-xs text-slate-500">{c.incoming.date}</p>
+                                                </div>
+                                                <span className="font-mono font-bold text-indigo-700 text-lg">${c.incoming.amount}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="text-slate-300">
+                                            <ArrowRight size={24} />
+                                        </div>
+
+                                        <div className="flex-1 space-y-2 opacity-75">
+                                            <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                                <span>Existente (Base de Datos)</span>
+                                            </div>
+                                            <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                                <div>
+                                                    <p className="font-bold text-slate-700">{c.existing.description_original}</p>
+                                                    <p className="text-xs text-slate-500">{c.existing.date}</p>
+                                                </div>
+                                                <span className="font-mono font-bold text-slate-600 text-lg">${c.existing.amount}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-col gap-2 pl-4 border-l border-slate-100">
+                                            <button onClick={() => resolveConflict(idx, 'KEEP')} className="px-3 py-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg">
+                                                Importar
+                                            </button>
+                                            <button onClick={() => resolveConflict(idx, 'SKIP')} className="px-3 py-1.5 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg">
+                                                Omitir
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {conflicts.length === 0 && (
+                                <div className="p-8 text-center bg-emerald-50 rounded-2xl border border-emerald-100 animate-in zoom-in">
+                                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <CheckCircle size={32} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-emerald-900">¡Conflictos Resueltos!</h3>
+                                    <p className="text-emerald-700 mb-6">Listo para importar {safeTransactions.length + resolvedConflicts.length} transacciones.</p>
+                                    <button
+                                        onClick={() => finalSave([...safeTransactions, ...resolvedConflicts])}
+                                        disabled={isSaving}
+                                        className="px-8 py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        {isSaving ? (
+                                            <>
+                                                <Loader2 size={18} className="animate-spin" /> Guardando...
+                                            </>
+                                        ) : (
+                                            <>Finalizar Importación</>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )
+                }
             </div>
         </div >
     );
@@ -531,7 +718,7 @@ export const Importer = () => {
 const StepBadge = ({ step, current, number, label }: any) => {
     const isActive = current === step;
     // Rough logic for completed steps would need a proper order check, simplified here
-    const isCompleted = (step === 'UPLOAD' && current !== 'UPLOAD') || (step === 'MAP' && current === 'PREVIEW');
+    const isCompleted = (step === 'UPLOAD' && current !== 'UPLOAD') || (step === 'MAP' && current !== 'MAP' && current !== 'UPLOAD') || (step === 'PREVIEW' && current === 'RESOLVE');
 
     return (
         <div className={`flex items-center gap-2 ${isActive ? 'text-indigo-600' : isCompleted ? 'text-emerald-600' : 'text-slate-400'}`}>

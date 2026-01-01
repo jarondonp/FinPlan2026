@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard } from 'lucide-react';
 import { MonthStatusBadge } from '../closing/MonthStatusBadge';
+import { useAccountBalance } from '../../hooks/useAccountBalance';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
@@ -22,9 +23,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
         .toArray(), [scope]) || [];
 
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    const accounts = useAccountBalance(scope);
 
     const categories = useLiveQuery(() => db.categories
         .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
@@ -58,9 +57,9 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     const { totalLiquidity, totalDebt } = activeAccounts.reduce((acc, a) => {
         const isLiability = a.type === 'Credit Card' || a.type === 'Loan';
         if (isLiability) {
-            acc.totalDebt += (a.balance || 0);
+            acc.totalDebt += (a.dynamicBalance || 0);
         } else {
-            acc.totalLiquidity += (a.balance || 0);
+            acc.totalLiquidity += (a.dynamicBalance || 0);
         }
         return acc;
     }, { totalLiquidity: 0, totalDebt: 0 });
@@ -232,7 +231,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                             <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                                 <DollarSign size={24} />
                             </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Liquidez</span>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Liquidez Actual</span>
                         </div>
                         <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
                     </div>

@@ -1,6 +1,6 @@
 import { db } from '../db/db';
-import { MonthStatus, MonthlyClosing, Scope } from '../types';
-import { getStartOfMonth, formatMonth } from '../utils';
+import { MonthStatus, MonthlyClosing, Scope, Transaction } from '../types';
+import { getStartOfMonth, formatMonth, generateId } from '../utils';
 
 // Helper to get safe YYYY-MM from local date
 const getMonthKey = (date: Date) => {
@@ -98,9 +98,66 @@ export const closingService = {
         await db.monthlyClosings.update(id, { status: 'OPEN' });
     },
 
-    // 5. Check if a transaction date is editable
     async isTransactionEditable(date: Date, scope: Scope): Promise<boolean> {
         const status = await this.getStatus(date, scope);
         return status === 'OPEN';
+    },
+
+    // 6. Get Account Balance for Verification
+    async getAccountBalance(accountId: string, dateLimit: Date): Promise<number> {
+        // String comparison YYYY-MM-DD
+        const limitStr = dateLimit.toISOString().split('T')[0];
+
+        const txs = await db.transactions
+            .where('account_id').equals(accountId)
+            .filter(t => t.date <= limitStr)
+            .toArray();
+
+        const account = await db.accounts.get(accountId);
+        const initialBalance = account?.balance || 0;
+
+        return initialBalance + txs.reduce((sum, t) => sum + t.amount, 0);
+    },
+
+    // 7. Create Adjustment
+    async createBalanceAdjustment(accountId: string, difference: number, date: Date, scope: Scope): Promise<void> {
+        const adjustment: Transaction = {
+            id: generateId(),
+            date: date.toISOString().split('T')[0],
+            amount: difference,
+            description_original: "Ajuste Automático de Cierre",
+            description_normalized: "Ajuste de Balance",
+            category: "Ajustes", // Ensure this category exists or is treated specially
+            type: "ADJUSTMENT",
+            status: "ADJUSTMENT",
+            account_id: accountId,
+            scope: scope,
+            is_duplicate: false,
+            needs_review: false
+        };
+        await db.transactions.add(adjustment);
+    },
+
+    // 8. Reconstruct Initial Balance (Genesis Month - Engineering Reverse)
+    async reconstructInitialBalance(accountId: string, finalBalance: number, dateLimit: Date): Promise<void> {
+        // A. Calculate Net Flow for the month (Income - Expenses) considering transactions BEFORE the split
+        // Actually, for genesis, we take ALL transactions up to that date.
+
+        const limitStr = dateLimit.toISOString().split('T')[0];
+        const txs = await db.transactions
+            .where('account_id').equals(accountId)
+            .filter(t => t.date <= limitStr)
+            .toArray();
+
+        // B. Calculate Net Flow
+        const netFlow = txs.reduce((sum, t) => sum + t.amount, 0);
+
+        // C. Calculate Required Initial Balance
+        // Formula: Final = Initial + NetFlow
+        // Therefore: Initial = Final - NetFlow
+        const newInitialBalance = finalBalance - netFlow;
+
+        // D. Update Account
+        await db.accounts.update(accountId, { balance: newInitialBalance });
     }
 };

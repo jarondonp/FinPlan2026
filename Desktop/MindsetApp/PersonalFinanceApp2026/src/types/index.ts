@@ -1,4 +1,5 @@
-export type TransactionType = "INCOME" | "EXPENSE" | "TRANSFER";
+export type TransactionType = "INCOME" | "EXPENSE" | "TRANSFER" | "ADJUSTMENT";
+export type TransactionStatus = 'PROVISIONAL' | 'VERIFIED' | 'ADJUSTMENT';
 export type AccountType = "Checking" | "Credit Card" | "Savings" | "Loan" | "Investment";
 export type Scope = 'PERSONAL' | 'BUSINESS';
 
@@ -31,6 +32,7 @@ export interface Transaction {
   account_id: string;
   is_duplicate: boolean;
   needs_review: boolean;
+  status?: TransactionStatus;
   scope?: Scope;
 }
 

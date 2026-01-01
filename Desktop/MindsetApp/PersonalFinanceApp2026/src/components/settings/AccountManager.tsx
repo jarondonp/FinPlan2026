@@ -5,12 +5,11 @@ import { Account, AccountType } from '../../types';
 import { formatCurrency, generateId } from '../../utils';
 import { Wallet, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
+import { useAccountBalance } from '../../hooks/useAccountBalance';
 
 export const AccountManager = () => {
     const { scope } = useScope();
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    const accounts = useAccountBalance(scope);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Account>>({});
 
@@ -78,8 +77,8 @@ export const AccountManager = () => {
                                     <h4 className="font-bold text-slate-800 text-lg">{acc.name}</h4>
                                     <p className="text-xs text-slate-500">{acc.institution}</p>
                                 </div>
-                                <div className={`text-lg font-mono font-bold ${acc.balance < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                                    {formatCurrency(acc.balance)}
+                                <div className={`text-lg font-mono font-bold ${acc.dynamicBalance < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                    {formatCurrency(acc.dynamicBalance)}
                                 </div>
                             </div>
 
@@ -136,7 +135,7 @@ const AccountEditor = ({ form, setForm, onSave, onCancel }: any) => {
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Saldo Actual</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Saldo Inicial (Ancla Histórica)</label>
                     <div className="relative">
                         <input
                             type="number"

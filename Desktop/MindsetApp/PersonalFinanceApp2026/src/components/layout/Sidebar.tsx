@@ -19,6 +19,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../../db/db";
 import { formatCurrency } from "../../utils";
 import { useScope } from '../../context/GlobalFilterContext';
+import { useAccountBalance } from '../../hooks/useAccountBalance';
 // import { DEMO_ACCOUNTS, DEMO_TRANSACTIONS, DEMO_GOALS, DEFAULT_CATEGORIES } from "../../utils";
 // I'll handle demo data loading inside the component for now or move it to utils.
 
@@ -29,13 +30,12 @@ interface SidebarProps {
 
 export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
     const { scope } = useScope();
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    const accounts = useAccountBalance(scope);
 
     const totalBalance = accounts.reduce((acc, curr) => {
         const isLiability = curr.type === 'Credit Card' || curr.type === 'Loan';
-        return acc + (isLiability ? -(curr.balance || 0) : (curr.balance || 0));
+        // Use dynamicBalance instead of static balance
+        return acc + (isLiability ? -(curr.dynamicBalance || 0) : (curr.dynamicBalance || 0));
     }, 0);
 
     const loadDemoData = async () => {
@@ -82,11 +82,11 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
 
                     {/* Assets */}
                     <div className="flex justify-between items-center">
-                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Liquidez</div>
+                        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Liquidez Actual</div>
                         <div className="font-bold text-emerald-400">
                             {formatCurrency(accounts
                                 .filter(a => !['Credit Card', 'Loan'].includes(a.type))
-                                .reduce((sum, a) => sum + (a.balance || 0), 0)
+                                .reduce((sum, a) => sum + (a.dynamicBalance || 0), 0)
                             )}
                         </div>
                     </div>
@@ -97,7 +97,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                         <div className="font-bold text-rose-400">
                             {formatCurrency(accounts
                                 .filter(a => ['Credit Card', 'Loan'].includes(a.type))
-                                .reduce((sum, a) => sum + (a.balance || 0), 0)
+                                .reduce((sum, a) => sum + (a.dynamicBalance || 0), 0)
                             )}
                         </div>
                     </div>
@@ -108,7 +108,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                         <div className="font-bold text-blue-400">
                             {formatCurrency(accounts
                                 .filter(a => a.type === 'Credit Card')
-                                .reduce((sum, a) => sum + Math.max(0, (a.limit || 0) - (a.balance || 0)), 0)
+                                .reduce((sum, a) => sum + Math.max(0, (a.limit || 0) - (a.dynamicBalance || 0)), 0)
                             )}
                         </div>
                     </div>

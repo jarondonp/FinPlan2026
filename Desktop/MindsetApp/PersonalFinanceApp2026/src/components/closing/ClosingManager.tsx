@@ -5,12 +5,16 @@ import { closingService } from '../../services/ClosingService';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { formatMonth } from '../../utils';
 import { Lock, Unlock, AlertTriangle, CheckCircle, ChevronRight, RotateCcw } from 'lucide-react';
+import { ClosingWizard } from './ClosingWizard';
 
 export const ClosingManager = () => {
     const { filterState } = useGlobalFilter();
     const { scope } = filterState;
     const [currentStatus, setCurrentStatus] = useState<'OPEN' | 'CLOSED' | 'LOCKED'>('OPEN');
     const [canClose, setCanClose] = useState<{ allowed: boolean, reason?: string }>({ allowed: true });
+
+    // Wizard State
+    const [wizardTargetDate, setWizardTargetDate] = useState<Date | null>(null);
 
     // Refresh mechanism to sync Left/Right panels
     const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -29,16 +33,15 @@ export const ClosingManager = () => {
         check();
     }, [monthDate, scope, refreshTrigger]); // Added refreshTrigger
 
-    const handleCloseMonth = async (targetDate: Date) => {
-        if (!confirm(`¿Estás seguro de cerrar el mes de ${formatMonth(targetDate)}?\n\nEsta acción bloqueará la edición de transacciones.`)) return;
+    const handleCloseMonth = (targetDate: Date) => {
+        // Instead of immediate close, open Wizard
+        setWizardTargetDate(targetDate);
+    };
 
-        try {
-            await closingService.closeMonth(targetDate, scope);
-            alert("Mes cerrado exitosamente.");
-            forceRefresh(); // Trigger global UI update
-        } catch (e: any) {
-            alert(`Error: ${e.message}`);
-        }
+    const onWizardSuccess = () => {
+        alert("Mes cerrado exitosamente.");
+        setWizardTargetDate(null);
+        forceRefresh();
     };
 
     const handleReopenMonth = async (targetDate: Date) => {
@@ -152,6 +155,15 @@ export const ClosingManager = () => {
                     </table>
                 </div>
             </div>
+            {/* Wizard Modal */}
+            {wizardTargetDate && (
+                <ClosingWizard
+                    monthDate={wizardTargetDate}
+                    scope={scope}
+                    onClose={() => setWizardTargetDate(null)}
+                    onSuccess={onWizardSuccess}
+                />
+            )}
         </div>
     );
 };
@@ -171,7 +183,7 @@ const MonthRow = ({ date, scope, onClose, onReopen, refreshTrigger }: any) => {
         load();
     }, [date, scope, refreshTrigger]); // Listen to refreshTrigger
 
-    const isCurrentMonth = "2025-12" === date.toISOString().slice(0, 7) || new Date().toISOString().slice(0, 7) === date.toISOString().slice(0, 7);
+    const isCurrentMonth = new Date().toISOString().slice(0, 7) === date.toISOString().slice(0, 7);
 
     return (
         <tr className={`hover:bg-slate-50 transition-colors ${isCurrentMonth ? 'bg-indigo-50/50' : ''}`}>
