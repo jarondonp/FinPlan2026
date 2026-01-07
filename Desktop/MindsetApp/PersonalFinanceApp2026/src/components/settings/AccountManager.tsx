@@ -12,28 +12,68 @@ export const AccountManager = () => {
     const accounts = useAccountBalance(scope);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Account>>({});
+    const [originalBalance, setOriginalBalance] = useState<number>(0);
+    const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
     const handleEdit = (acc: Account) => {
         setEditingId(acc.id);
-        setEditForm({ ...acc });
+        // Show balance as POSITIVE to user (regardless of internal sign)
+        setEditForm({
+            ...acc,
+            balance: Math.abs(acc.balance || 0) as any
+        });
+        setOriginalBalance(acc.balance || 0);  // Keep original with sign for comparison
     };
 
     const handleSave = async () => {
         if (!editForm.name || !editForm.type) return;
 
+        // Check if balance changed for existing account
+        if (editingId !== 'NEW' && editForm.balance !== Math.abs(originalBalance)) {
+            setShowConfirmDialog(true);
+            return;
+        }
+
+        await saveAccount();
+    };
+
+    const saveAccount = async () => {
+        // ============================================
+        // DEBT SIGN CONVENTION: User-Friendly Approach
+        // ============================================
+        // User always inputs POSITIVE numbers
+        // System converts based on account type:
+        // - Credit Cards/Loans → NEGATIVE (debt)
+        // - Checking/Savings/Investment → POSITIVE (assets)
+        // ============================================
+
+        let normalizedBalance = parseFloat(editForm.balance as any) || 0;
+
+        if (editForm.type === 'Credit Card' || editForm.type === 'Loan') {
+            // Debt accounts: force negative
+            normalizedBalance = -Math.abs(normalizedBalance);
+        } else {
+            // Asset accounts: force positive
+            normalizedBalance = Math.abs(normalizedBalance);
+        }
+
         if (editingId === 'NEW') {
             await db.accounts.add({
                 ...editForm,
                 id: generateId(),
-                balance: editForm.balance || 0,
+                balance: normalizedBalance,  // Normalized based on account type
                 currency: 'USD',
                 scope: scope
             } as Account);
         } else {
-            await db.accounts.update(editingId!, editForm);
+            await db.accounts.update(editingId!, {
+                ...editForm,
+                balance: normalizedBalance  // Normalized based on account type
+            });
         }
         setEditingId(null);
         setEditForm({});
+        setShowConfirmDialog(false);
     };
 
     const handleDelete = (id: string) => {
@@ -45,6 +85,7 @@ export const AccountManager = () => {
     const startNewAccount = () => {
         setEditingId('NEW');
         setEditForm({ type: 'Checking', currency: 'USD', balance: 0 });
+        setOriginalBalance(0);
     };
 
     return (
@@ -111,6 +152,18 @@ export const AccountManager = () => {
                     )
                 ))}
             </div>
+
+            {/* Confirmation Dialog */}
+            {showConfirmDialog && (
+                <BalanceChangeConfirmDialog
+                    accountName={editForm.name || ''}
+                    oldBalance={originalBalance}
+                    newBalance={editForm.balance || 0}
+                    currentDynamicBalance={accounts.find(a => a.id === editingId)?.dynamicBalance || 0}
+                    onConfirm={saveAccount}
+                    onCancel={() => setShowConfirmDialog(false)}
+                />
+            )}
         </div>
     );
 };
@@ -135,18 +188,31 @@ const AccountEditor = ({ form, setForm, onSave, onCancel }: any) => {
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Saldo Inicial (Ancla Histórica)</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
+                        {(form.type === 'Credit Card' || form.type === 'Loan')
+                            ? 'Deuda Inicial (¿Cuánto debes?)'
+                            : 'Saldo Inicial (¿Cuánto tienes?)'}
+                        {!!form.id && (
+                            <span className="text-amber-500" title="Cambiar este valor afectará todos los cálculos históricos">⚠️</span>
+                        )}
+                    </label>
                     <div className="relative">
                         <input
                             type="number"
-                            disabled={!!form.id} // Disable if editing existing
-                            className={`w-full px-3 py-2 border rounded-lg text-sm ${!!form.id ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+                            className={`w-full px-3 py-2 border rounded-lg text-sm ${!!form.id ? 'border-amber-300 bg-amber-50' : ''}`}
                             value={form.balance || 0}
                             onChange={e => setForm({ ...form, balance: parseFloat(e.target.value) })}
+                            placeholder={(form.type === 'Credit Card' || form.type === 'Loan') ? 'Ej. 2000' : 'Ej. 5000'}
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">
+                            {(form.type === 'Credit Card' || form.type === 'Loan')
+                                ? '💡 Ingresa solo el monto que debes (sin signo negativo)'
+                                : '💡 Ingresa el monto disponible en la cuenta'}
+                        </p>
                         {!!form.id && (
-                            <div className="absolute right-0 top-full mt-1 text-[10px] text-amber-600 font-medium">
-                                * Para ajustar, usa una transacción.
+                            <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800">
+                                <strong>⚠️ Advertencia:</strong> Cambiar el saldo inicial afectará todos los cálculos históricos de balance.
+                                Solo edita este campo si estás configurando la cuenta por primera vez o corrigiendo un error de registro inicial.
                             </div>
                         )}
                     </div>
@@ -181,3 +247,79 @@ const AccountEditor = ({ form, setForm, onSave, onCancel }: any) => {
         </div>
     )
 }
+
+interface BalanceChangeConfirmDialogProps {
+    accountName: string;
+    oldBalance: number;
+    newBalance: number;
+    currentDynamicBalance: number;
+    onConfirm: () => void;
+    onCancel: () => void;
+}
+
+const BalanceChangeConfirmDialog = ({ accountName, oldBalance, newBalance, currentDynamicBalance, onConfirm, onCancel }: BalanceChangeConfirmDialogProps) => {
+    const difference = newBalance - oldBalance;
+    const newDynamicBalance = currentDynamicBalance + difference;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-in slide-in-from-bottom-4">
+                <div className="p-6 border-b border-slate-200">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <span className="text-2xl">⚠️</span>
+                        Confirmar Cambio de Saldo Inicial
+                    </h3>
+                </div>
+                <div className="p-6 space-y-4">
+                    <p className="text-sm text-slate-600">
+                        Estás a punto de cambiar el <strong>Saldo Inicial (Ancla Histórica)</strong> de la cuenta <strong className="text-indigo-600">{accountName}</strong>.
+                    </p>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
+                        <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">Saldo Inicial Anterior:</span>
+                            <span className="font-mono font-bold text-slate-800">{formatCurrency(oldBalance)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">Saldo Inicial Nuevo:</span>
+                            <span className="font-mono font-bold text-amber-600">{formatCurrency(newBalance)}</span>
+                        </div>
+                        <div className="border-t border-amber-300 pt-2 mt-2">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-slate-600">Balance Dinámico Actual:</span>
+                                <span className="font-mono font-bold">{formatCurrency(currentDynamicBalance)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-slate-600">Balance Dinámico Nuevo:</span>
+                                <span className={`font-mono font-bold ${newDynamicBalance < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                    {formatCurrency(newDynamicBalance)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                        <p className="text-xs text-slate-600">
+                            <strong>Impacto:</strong> Este cambio afectará todos los cálculos históricos de balance.
+                            Todas las transacciones existentes se sumarán al nuevo ancla.
+                        </p>
+                    </div>
+                </div>
+                <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
+                    <button
+                        onClick={onCancel}
+                        className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold transition-colors shadow-lg shadow-amber-200"
+                    >
+                        Confirmar Cambio
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};

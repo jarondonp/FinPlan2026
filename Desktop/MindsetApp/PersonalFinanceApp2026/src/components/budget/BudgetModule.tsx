@@ -51,11 +51,36 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     }, [scope]);
 
     // Budget Calculations
-    const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
+    // FIX: Respect Global Timeframe instead of hardcoded current month
+    const currentDateRange = useMemo(() => {
+        // If timeframe is set (e.g. "Previous Month" or Custom), use it.
+        // If generic "Current Month", use today.
+        // Assuming timeframe.start and end are YYYY-MM-DD strings.
+        const start = timeframe.start ? new Date(timeframe.start) : new Date();
+        const monthStr = start.toISOString().slice(0, 7); // YYYY-MM
+        return {
+            monthStr,
+            startStr: timeframe.start,
+            endStr: timeframe.end
+        };
+    }, [timeframe]);
+
     const budgetData = useMemo(() => {
         const spentMap: Record<string, number> = {};
+
         transactions
-            .filter(t => t.date.startsWith(currentMonthStr) && t.type === 'EXPENSE')
+            .filter(t => {
+                // Filter by date range from global context
+                if (currentDateRange.startStr && currentDateRange.endStr) {
+                    const tDate = t.date; // String YYYY-MM-DD
+                    const start = currentDateRange.startStr instanceof Date ? currentDateRange.startStr.toISOString().split('T')[0] : currentDateRange.startStr;
+                    const end = currentDateRange.endStr instanceof Date ? currentDateRange.endStr.toISOString().split('T')[0] : currentDateRange.endStr;
+                    return tDate >= start && tDate <= end;
+                }
+                // Fallback to month string check
+                return t.date.startsWith(currentDateRange.monthStr);
+            })
+            .filter(t => t.type === 'EXPENSE')
             .forEach(t => {
                 spentMap[t.category] = (spentMap[t.category] || 0) + Math.abs(t.amount);
             });
@@ -76,7 +101,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                 minRequired: fixedMap[cat.name] || 0
             }))
             .sort((a, b) => (b.limit > 0 ? b.spent / b.limit : 0) - (a.limit > 0 ? a.spent / a.limit : 0));
-    }, [categories, transactions, currentMonthStr, recurringExpenses]);
+    }, [categories, transactions, currentDateRange, recurringExpenses]);
 
     const handleUpdateLimit = (catName: string, newLimit: number) => {
         db.categories.update(catName, { budgetLimit: newLimit });

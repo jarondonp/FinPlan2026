@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
-import { IncomeSource, RecurringExpense } from '../../types';
+import { IncomeSource, RecurringExpense, RecurringFrequency } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
 import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
+import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel } from '../../utils/subscriptionHelpers';
 
 export const RecurringManager = () => {
     const { scope } = useScope();
@@ -21,7 +22,13 @@ export const RecurringManager = () => {
         .toArray(), [scope]) || [];
 
     const [newIncome, setNewIncome] = useState<Partial<IncomeSource>>({ frequency: 'MONTHLY' });
-    const [newExpense, setNewExpense] = useState<Partial<RecurringExpense>>({ active: true, autoPay: false });
+    const [newExpense, setNewExpense] = useState<Partial<RecurringExpense>>({
+        active: true,
+        autoPay: false,
+        frequency: 'MONTHLY' as RecurringFrequency,
+        startDate: new Date().toISOString().split('T')[0],
+        nextDueDate: '',
+    });
 
     // --- Validation Logic ---
     const getBudgetConflict = (amount: number, categoryName: string) => {
@@ -66,7 +73,7 @@ export const RecurringManager = () => {
 
     // --- Expense Handlers ---
     const addExpense = async () => {
-        if (!newExpense.name || !newExpense.amount || !newExpense.dueDay || !newExpense.category) return;
+        if (!newExpense.name || !newExpense.amount || !newExpense.nextDueDate || !newExpense.category) return;
         const amount = parseFloat(newExpense.amount.toString());
 
         // Validate Budget Update
@@ -77,14 +84,29 @@ export const RecurringManager = () => {
             }
         }
 
+        // Extract day from nextDueDate for backward compatibility
+        const nextDue = new Date(newExpense.nextDueDate);
+        const dueDay = nextDue.getDate();
+
         await db.recurringExpenses.add({
             ...newExpense,
             id: generateId(),
             amount: amount,
-            dueDay: parseInt(newExpense.dueDay.toString()),
+            dueDay: dueDay, // Keep for backward compat
+            frequency: newExpense.frequency || 'MONTHLY',
+            startDate: newExpense.startDate || new Date().toISOString().split('T')[0],
+            nextDueDate: newExpense.nextDueDate,
+            endDate: newExpense.endDate || undefined,
             scope: scope
         } as RecurringExpense);
-        setNewExpense({ active: true, autoPay: false });
+
+        setNewExpense({
+            active: true,
+            autoPay: false,
+            frequency: 'MONTHLY',
+            startDate: new Date().toISOString().split('T')[0],
+            nextDueDate: '',
+        });
     };
 
     const deleteExpense = (id: string) => db.recurringExpenses.delete(id);

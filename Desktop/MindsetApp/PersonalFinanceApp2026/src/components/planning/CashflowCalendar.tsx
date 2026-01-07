@@ -5,13 +5,12 @@ import { calculateDailyBalances, DailyBalance } from '../../utils/cashflowLogic'
 import { formatCurrency } from '../../utils';
 import { ChevronLeft, ChevronRight, AlertCircle, TrendingUp, Calendar as CalIcon, Flame, CreditCard } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
+import { useAccountBalance } from '../../hooks/useAccountBalance';
 
 export const CashflowCalendar = () => {
     const { scope } = useScope();
-    // Data Fetching
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    // Use useAccountBalance hook to get accounts with dynamicBalance
+    const accounts = useAccountBalance(scope);
 
     const incomes = useLiveQuery(() => db.incomeSources
         .filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope))
@@ -29,7 +28,9 @@ export const CashflowCalendar = () => {
     const initialBalance = useMemo(() => {
         return accounts
             .filter(a => a.type === 'Checking')
-            .reduce((sum, a) => sum + a.balance, 0);
+            // Use dynamicBalance (current balance) not static balance (historical anchor)
+            // dynamicBalance = initial balance + all transactions
+            .reduce((sum, a) => sum + (a.dynamicBalance || 0), 0);
     }, [accounts]);
 
     const projectionDays = 60;

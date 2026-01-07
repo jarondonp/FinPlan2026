@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Transaction, Account, Goal, Rule, CategoryDef, IncomeSource, RecurringExpense, MonthlyClosing } from '../types';
+import { Transaction, Account, Goal, Rule, CategoryDef, IncomeSource, RecurringExpense, MonthlyClosing, MonthlyBudget } from '../types';
 import { DEFAULT_CATEGORIES } from '../utils';
 
 export class FinMapDB extends Dexie {
@@ -13,9 +13,13 @@ export class FinMapDB extends Dexie {
     recurringExpenses!: Table<RecurringExpense>;
     monthlyClosings!: Table<MonthlyClosing>;
 
+    monthlyBudgets!: Table<MonthlyBudget>;
+
     constructor() {
         super('FinMapDB');
-        this.version(4).stores({
+
+        // Version 5: Original schema
+        this.version(5).stores({
             transactions: 'id, date, type, category, account_id, scope',
             accounts: 'id, type, scope',
             goals: 'id, scope',
@@ -23,7 +27,51 @@ export class FinMapDB extends Dexie {
             categories: 'name, scope',
             incomeSources: 'id, scope',
             recurringExpenses: 'id, category, scope',
-            monthlyClosings: 'id, monthStr, scope, status'
+            monthlyClosings: 'id, monthStr, scope, status',
+            monthlyBudgets: 'id, [month+scope], category'
+        });
+
+        // Version 6: Add subscription frequency support
+        this.version(6).stores({
+            transactions: 'id, date, type, category, account_id, scope',
+            accounts: 'id, type, scope',
+            goals: 'id, scope',
+            rules: 'id, scope',
+            categories: 'name, scope',
+            incomeSources: 'id, scope',
+            recurringExpenses: 'id, category, scope, frequency, nextDueDate', // Added indexes
+            monthlyClosings: 'id, monthStr, scope, status',
+            monthlyBudgets: 'id, [month+scope], category'
+        }).upgrade(async (tx) => {
+            // Migrate existing RecurringExpense records
+            const expenses = await tx.table('recurringExpenses').toArray();
+
+            for (const expense of expenses) {
+                // Only migrate if missing new fields
+                if (!expense.frequency || !expense.nextDueDate) {
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = today.getMonth();
+
+                    // Calculate nextDueDate from dueDay
+                    const nextDue = new Date(year, month, expense.dueDay);
+                    if (nextDue < today) {
+                        // If already passed this month, use next month
+                        nextDue.setMonth(month + 1);
+                    }
+
+                    // Update with new fields while keeping ALL existing data
+                    await tx.table('recurringExpenses').update(expense.id, {
+                        frequency: 'MONTHLY',  // Default to monthly
+                        startDate: `${year}-01-01`,  // Start of current year
+                        nextDueDate: nextDue.toISOString().split('T')[0],
+                        // endDate remains undefined
+                        // dueDay, amount, name, category, etc. are PRESERVED
+                    });
+                }
+            }
+
+            console.log(`✅ Migrated ${expenses.length} recurring expenses to v6`);
         });
     }
 
@@ -36,7 +84,10 @@ export class FinMapDB extends Dexie {
                 this.rules.clear(),
                 this.categories.clear(),
                 this.incomeSources.clear(),
-                this.recurringExpenses.clear()
+                this.categories.clear(),
+                this.incomeSources.clear(),
+                this.recurringExpenses.clear(),
+                this.monthlyBudgets.clear()
             ]);
             // Reseed default categories
             await this.categories.bulkAdd(DEFAULT_CATEGORIES);

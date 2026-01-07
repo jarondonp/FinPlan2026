@@ -1,6 +1,7 @@
 import { db } from '../db/db';
-import { MonthStatus, MonthlyClosing, Scope, Transaction } from '../types';
+import { MonthlyClosingStatus, MonthlyClosing, Scope, Transaction } from '../types';
 import { getStartOfMonth, formatMonth, generateId } from '../utils';
+import { budgetService } from './BudgetService';
 
 // Helper to get safe YYYY-MM from local date
 const getMonthKey = (date: Date) => {
@@ -11,7 +12,7 @@ const getMonthKey = (date: Date) => {
 
 export const closingService = {
     // 1. Get Status
-    async getStatus(month: Date, scope: Scope): Promise<MonthStatus> {
+    async getStatus(month: Date, scope: Scope): Promise<MonthlyClosingStatus> {
         const monthStr = getMonthKey(month);
         const id = `${monthStr}-${scope}`;
 
@@ -28,6 +29,16 @@ export const closingService = {
         // 1. If trying to close before Genesis, Block.
         if (currentTimestamp < GENESIS_TIMESTAMP) {
             return { allowed: false, reason: "Este mes es anterior al inicio del sistema (Dic 2025)." };
+        }
+
+        // 1.5. Check Budget Health (Phase 6)
+        // We do this check for ANY month, even Genesis. You can't close if you have red categories.
+        const health = await budgetService.getBudgetHealth(month, scope);
+        if (health.hasOverspent) {
+            return {
+                allowed: false,
+                reason: `Presupuesto en Rojo: Tienes ${health.overspentCategories.length} categorías con saldo negativo. Debes cubrir los sobregiros antes de cerrar.`
+            };
         }
 
         // 2. If it is Genesis month, Allow (no previous check needed).

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update Account Balance</title>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #334155;
+            margin-bottom: 20px;
+        }
+        .info {
+            background: #e0f2fe;
+            border: 1px solid #0284c7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .success {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+        }
+        .error {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+        }
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover {
+            background: #4338ca;
+        }
+        pre {
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Actualizar Saldo Inicial - Paypal TDC</h1>
+        
+        <div id="status" class="info">
+            <strong>Estado:</strong> Listo para actualizar
+        </div>
+        
+        <div id="accountInfo"></div>
+        
+        <button onclick="updateBalance()">Actualizar Saldo a $71.90</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // Define the database schema (matching db.ts)
+        const db = new Dexie('FinMapDB');
+        db.version(5).stores({
+            transactions: 'id, date, type, category, account_id, scope',
+            accounts: 'id, type, scope',
+            goals: 'id, scope',
+            rules: 'id, scope',
+            categories: 'name, scope',
+            incomeSources: 'id, scope',
+            recurringExpenses: 'id, category, scope',
+            monthlyClosings: 'id, monthStr, scope, status',
+            monthlyBudgets: 'id, [month+scope], category'
+        });
+
+        // Load current account info on page load
+        window.onload = async function() {
+            try {
+                const accounts = await db.accounts.toArray();
+                const paypalTDC = accounts.find(acc => acc.name === 'Paypal TDC');
+                
+                if (paypalTDC) {
+                    document.getElementById('accountInfo').innerHTML = `
+                        <div class="info">
+                            <strong>Cuenta encontrada:</strong><br>
+                            <pre>${JSON.stringify(paypalTDC, null, 2)}</pre>
+                            <strong>Saldo actual:</strong> $${paypalTDC.balance || 0}
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('accountInfo').innerHTML = `
+                        <div class="error">
+                            <strong>⚠️ Cuenta "Paypal TDC" no encontrada</strong><br>
+                            Cuentas disponibles: ${accounts.map(a => a.name).join(', ')}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('accountInfo').innerHTML = `
+                    <div class="error">
+                        <strong>Error al cargar cuenta:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        };
+
+        async function updateBalance() {
+            const newBalance = 71.90;
+            const resultDiv = document.getElementById('result');
+            const statusDiv = document.getElementById('status');
+            
+            try {
+                statusDiv.className = 'info';
+                statusDiv.innerHTML = '<strong>Estado:</strong> Actualizando...';
+                
+                // Find the account
+                const accounts = await db.accounts.toArray();
+                const paypalTDC = accounts.find(acc => acc.name === 'Paypal TDC');
+                
+                if (!paypalTDC) {
+                    throw new Error('Cuenta "Paypal TDC" no encontrada');
+                }
+                
+                // Update the balance
+                await db.accounts.update(paypalTDC.id, { balance: newBalance });
+                
+                // Verify the update
+                const updatedAccount = await db.accounts.get(paypalTDC.id);
+                
+                statusDiv.className = 'info success';
+                statusDiv.innerHTML = '<strong>✅ Estado:</strong> Actualización completada exitosamente';
+                
+                resultDiv.innerHTML = `
+                    <div class="info success">
+                        <h3>✅ Saldo actualizado exitosamente</h3>
+                        <strong>Cuenta:</strong> ${updatedAccount.name}<br>
+                        <strong>Saldo anterior:</strong> $${paypalTDC.balance || 0}<br>
+                        <strong>Saldo nuevo:</strong> $${updatedAccount.balance}<br>
+                        <br>
+                        <pre>${JSON.stringify(updatedAccount, null, 2)}</pre>
+                        <p style="margin-top: 15px;">
+                            <strong>Nota:</strong> Recarga la aplicación en <a href="http://localhost:3000" target="_blank">localhost:3000</a> para ver los cambios.
+                        </p>
+                    </div>
+                `;
+            } catch (error) {
+                statusDiv.className = 'info error';
+                statusDiv.innerHTML = '<strong>❌ Estado:</strong> Error en la actualización';
+                
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ Error al actualizar</h3>
+                        <strong>Mensaje:</strong> ${error.message}<br>
+                        <pre>${error.stack}</pre>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

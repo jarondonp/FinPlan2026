@@ -5,6 +5,7 @@ import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScope } from '../../context/GlobalFilterContext';
+import { useAccountBalance } from '../../hooks/useAccountBalance';
 
 interface PlanningModuleProps {
     onNavigate: (view: string) => void;
@@ -12,21 +13,23 @@ interface PlanningModuleProps {
 
 export const PlanningModule = ({ onNavigate }: PlanningModuleProps) => {
     const { scope } = useScope();
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    // Use useAccountBalance hook to get accounts with dynamicBalance
+    const accounts = useAccountBalance(scope);
     const [extraPayment, setExtraPayment] = useState(200);
     const [strategy, setStrategy] = useState<"AVALANCHE" | "SNOWBALL">("AVALANCHE");
 
     // Filter debt accounts
     const debtAccounts = useMemo(() => {
         return accounts
-            .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && a.balance < 0)
+            // Use dynamicBalance (current debt) instead of static balance
+            // dynamicBalance = initial balance + all transactions
+            .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && a.dynamicBalance < 0)
             .map(a => ({
                 ...a,
-                balance: Math.abs(a.balance), // Work with positive numbers for calculation
+                // Convert to positive for calculation
+                balance: Math.abs(a.dynamicBalance),  // Use DYNAMIC balance, not static
                 apr: a.apr || 0,
-                minPayment: a.minPayment || Math.abs(a.balance) * 0.02 // Estimate 2% if missing
+                minPayment: a.minPayment || Math.abs(a.dynamicBalance) * 0.02 // Estimate 2% if missing
             }));
     }, [accounts]);
 

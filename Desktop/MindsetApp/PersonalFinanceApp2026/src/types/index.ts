@@ -92,11 +92,29 @@ export interface IncomeSource {
   scope?: Scope;
 }
 
+// Subscription Frequencies
+export type RecurringFrequency =
+  | 'MONTHLY'       // Cada mes
+  | 'QUARTERLY'     // Cada 3 meses
+  | 'SEMI_ANNUAL'   // Cada 6 meses
+  | 'ANNUAL'        // Cada año
+  | 'BIENNIAL'      // Cada 2 años
+  | 'TRIENNIAL';    // Cada 3 años
+
 export interface RecurringExpense {
   id: string;
   name: string;   // e.g. "Rent", "Netflix"
   amount: number;
-  dueDay: number; // 1-31
+
+  // Legacy field - kept for backward compatibility
+  dueDay: number; // 1-31 (DEPRECATED: use nextDueDate instead)
+
+  // New frequency-based fields
+  frequency: RecurringFrequency;  // Default: 'MONTHLY'
+  startDate: string;              // YYYY-MM-DD
+  nextDueDate: string;            // YYYY-MM-DD (próximo cobro)
+  endDate?: string;               // YYYY-MM-DD (opcional)
+
   category: string;
   active: boolean;
   autoPay: boolean; // If true, funds deducted automatically
@@ -105,13 +123,22 @@ export interface RecurringExpense {
 
 // --- Phase 2: Closing Engine ---
 
-export type MonthStatus = 'OPEN' | 'CLOSED' | 'LOCKED';
+export interface MonthlyBudget {
+  id: string; // generated
+  month: string; // "YYYY-MM"
+  category: string; // Category Name
+  scope: Scope;
+  assigned: number; // The specific budget for this month
+  spent: number; // Cache for performance (optional, but let's keep it simple first without it)
+}
+
+export type MonthlyClosingStatus = 'OPEN' | 'CLOSED' | 'LOCKED';
 
 export interface MonthlyClosing {
   id: string;             // Format: "YYYY-MM-SCOPE" (Composite Key)
   monthStr: string;       // Format: "YYYY-MM"
   scope: Scope;           // PERSONAL | BUSINESS
-  status: MonthStatus;
+  status: MonthlyClosingStatus;
   closedAt?: string;      // ISO Date
   closedBy?: string;      // User ID (future proof)
   notes?: string;
