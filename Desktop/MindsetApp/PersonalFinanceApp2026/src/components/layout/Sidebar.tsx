@@ -97,7 +97,8 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                         <div className="font-bold text-rose-400">
                             {formatCurrency(accounts
                                 .filter(a => ['Credit Card', 'Loan'].includes(a.type))
-                                .reduce((sum, a) => sum + (a.dynamicBalance || 0), 0)
+                                // Debt Convention: Always show debt as POSITIVE
+                                .reduce((sum, a) => sum + Math.abs(a.dynamicBalance || 0), 0)
                             )}
                         </div>
                     </div>
@@ -108,7 +109,13 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                         <div className="font-bold text-blue-400">
                             {formatCurrency(accounts
                                 .filter(a => a.type === 'Credit Card')
-                                .reduce((sum, a) => sum + Math.max(0, (a.limit || 0) - (a.dynamicBalance || 0)), 0)
+                                .reduce((sum, a) => {
+                                    // Correct Formula: Available = Limit - Absolute(Debt)
+                                    // If dynamicBalance = -500 (debt), then debt = 500
+                                    const debt = Math.abs(a.dynamicBalance || 0);
+                                    const limit = a.limit || 0;
+                                    return sum + Math.max(0, limit - debt);
+                                }, 0)
                             )}
                         </div>
                     </div>

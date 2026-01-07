@@ -57,7 +57,9 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     const { totalLiquidity, totalDebt } = activeAccounts.reduce((acc, a) => {
         const isLiability = a.type === 'Credit Card' || a.type === 'Loan';
         if (isLiability) {
-            acc.totalDebt += (a.dynamicBalance || 0);
+            // Debt Convention: Always show debt as POSITIVE
+            // Internal storage is negative, but display should be positive
+            acc.totalDebt += Math.abs(a.dynamicBalance || 0);
         } else {
             acc.totalLiquidity += (a.dynamicBalance || 0);
         }
@@ -226,16 +228,40 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
             {/* Personal Cards (Hidden if Business) */}
             {scope === 'PERSONAL' && (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    {/* Saldo en Cheques - Only Checking/Savings */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                                 <DollarSign size={24} />
                             </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Liquidez Actual</span>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Saldo en Cheques</span>
                         </div>
                         <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
+                        <div className="text-xs text-slate-500 mt-2">Efectivo disponible</div>
                     </div>
 
+                    {/* Crédito Disponible TDC - Available credit from credit cards */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                                <CreditCard size={24} />
+                            </div>
+                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Crédito Disponible</span>
+                        </div>
+                        <div className="text-3xl font-bold text-blue-600">
+                            {formatCurrency(accounts
+                                .filter(a => a.type === 'Credit Card')
+                                .reduce((sum, a) => {
+                                    const debt = Math.abs(a.dynamicBalance || 0);
+                                    const limit = a.limit || 0;
+                                    return sum + Math.max(0, limit - debt);
+                                }, 0)
+                            )}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-2">Límite - Deuda</div>
+                    </div>
+
+                    {/* Deuda Total - Unchanged */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
@@ -244,8 +270,10 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Deuda Total</span>
                         </div>
                         <div className="text-3xl font-bold text-rose-600">{formatCurrency(totalDebt)}</div>
+                        <div className="text-xs text-slate-500 mt-2">Tarjetas + Préstamos</div>
                     </div>
 
+                    {/* Monthly Stats - Moved to 2nd row or keep as 4th item */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
@@ -255,7 +283,12 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                         </div>
                         <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
                     </div>
+                </div>
+            )}
 
+            {/* Second row for Gastos if needed, or merge into single row */}
+            {scope === 'PERSONAL' && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-start mb-4">
                             <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
