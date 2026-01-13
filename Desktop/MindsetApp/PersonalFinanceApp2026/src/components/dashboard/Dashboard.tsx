@@ -312,7 +312,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Crédito Disponible</span>
                         </div>
                         <div className="text-3xl font-bold text-blue-600">
-                            {formatCurrency(accounts
+                            {formatCurrency(activeAccounts
                                 .filter(a => a.type === 'Credit Card')
                                 .reduce((sum, a) => {
                                     const debt = Math.abs(a.dynamicBalance || 0);
