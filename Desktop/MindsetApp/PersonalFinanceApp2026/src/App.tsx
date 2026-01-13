@@ -9,12 +9,30 @@ import { SettingsManager } from "./components/settings/SettingsManager";
 import { CashflowCalendar } from './components/planning/CashflowCalendar';
 import { InvestmentSimulator } from './components/planning/InvestmentSimulator';
 import { AiAssistant } from './components/ai/AiAssistant';
-
 import { FilterBar } from './components/layout/FilterBar';
 
-export const App = () => {
+// Auth Imports
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { LoginScreen } from "./components/auth/LoginScreen";
+
+const AppContent = () => {
+    const { user, signInWithGoogle, loading } = useAuth();
+    // const user = { uid: "debug-mode" }; // MOCK USER TO BYPASS AUTH
+    // const loading = false;
     const [view, setView] = useState<"dashboard" | "transactions" | "import" | "settings" | "planning" | "budget" | "cashflow" | "investment">("dashboard");
     const [settingsTab, setSettingsTab] = useState<"accounts" | "categories" | "rules" | "recurring" | "closing">("accounts");
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <LoginScreen onLogin={signInWithGoogle} />;
+    }
 
     const navigateToSettings = (tab: "accounts" | "categories" | "rules" | "recurring" | "closing") => {
         setSettingsTab(tab);
@@ -60,3 +78,9 @@ export const App = () => {
         </div>
     );
 };
+
+export const App = () => (
+    <AuthProvider>
+        <AppContent />
+    </AuthProvider>
+);

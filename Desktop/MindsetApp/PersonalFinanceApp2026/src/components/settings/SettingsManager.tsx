@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from "react";
-import { Wallet, Tag, BrainCircuit, Calendar, Lock } from "lucide-react";
+import { Wallet, Tag, BrainCircuit, Calendar, Lock, Cloud, Download } from "lucide-react";
 import { AccountManager } from "./AccountManager";
 import { CategoryManager } from "./CategoryManager";
 import { RuleManager } from "./RuleManager";
 import { RecurringManager } from "./RecurringManager";
 import { ClosingManager } from "../closing/ClosingManager";
+import { DataMigration } from "./DataMigration";
+import { BackupManager } from "./BackupManager";
 
 interface SettingsManagerProps {
-    initialTab?: "accounts" | "categories" | "rules" | "recurring" | "closing";
+    initialTab?: "accounts" | "categories" | "rules" | "recurring" | "closing" | "migration" | "backup";
 }
 
 export const SettingsManager = ({ initialTab }: SettingsManagerProps) => {
-    const [activeTab, setActiveTab] = useState<"accounts" | "categories" | "rules" | "recurring" | "closing">(initialTab || "accounts");
+    const [activeTab, setActiveTab] = useState<"accounts" | "categories" | "rules" | "recurring" | "closing" | "migration" | "backup">(initialTab || "accounts");
 
     useEffect(() => {
         if (initialTab) setActiveTab(initialTab);
@@ -29,6 +31,11 @@ export const SettingsManager = ({ initialTab }: SettingsManagerProps) => {
                 <TabButton label="Ingresos y Recurrentes" icon={<Calendar size={16} />} active={activeTab === "recurring"} onClick={() => setActiveTab("recurring")} />
                 <TabButton label="Categorías y Presupuesto" icon={<Tag size={16} />} active={activeTab === "categories"} onClick={() => setActiveTab("categories")} />
                 <TabButton label="Reglas Automáticas" icon={<BrainCircuit size={16} />} active={activeTab === "rules"} onClick={() => setActiveTab("rules")} />
+
+                {/* Herramientas de Datos */}
+                <div className="w-px bg-slate-300 mx-1"></div>
+                <TabButton label="Respaldos" icon={<Download size={16} />} active={activeTab === "backup"} onClick={() => setActiveTab("backup")} />
+                <TabButton label="Migración Nube" icon={<Cloud size={16} />} active={activeTab === "migration"} onClick={() => setActiveTab("migration")} />
             </div>
 
             {activeTab === "accounts" && <AccountManager />}
@@ -36,6 +43,8 @@ export const SettingsManager = ({ initialTab }: SettingsManagerProps) => {
             {activeTab === "recurring" && <RecurringManager />}
             {activeTab === "categories" && <CategoryManager />}
             {activeTab === "rules" && <RuleManager />}
+            {activeTab === "backup" && <BackupManager />}
+            {activeTab === "migration" && <DataMigration />}
         </div>
     );
 };

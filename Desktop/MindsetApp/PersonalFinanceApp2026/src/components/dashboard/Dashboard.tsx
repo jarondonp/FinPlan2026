@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed for Firestore
+// import { db } from '../../db/db'; // Removed for Firestore
+import { useFirestore } from '../../hooks/useFirestore';
 import { formatCurrency } from '../../utils';
 import { useGlobalFilter, useScope } from '../../context/GlobalFilterContext';
 import {
@@ -29,20 +30,19 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     } = useGlobalFilter();
     const { timeframe, selectedAccountIds } = filterState;
 
-    // Data Fetching
-    const transactions = useLiveQuery(() => db.transactions
-        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
-        .toArray(), [scope]) || [];
+    // Data Fetching (Cloud)
+    // We fetch all and filter in memory for now (simpler migration)
+    const { data: allTransactions } = useFirestore<any>('transactions');
+    const transactions = (allTransactions || []).filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope));
 
+    // Accounts are fetched via the hook which we already updated
     const accounts = useAccountBalance(scope);
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { data: allCategories } = useFirestore<any>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
-    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    const { data: allRecurring } = useFirestore<any>('recurringExpenses');
+    const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
     // State for alert details
     const [expandedAlerts, setExpandedAlerts] = useState<Record<number, boolean>>({});

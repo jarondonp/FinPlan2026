@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { db } from '../../firebase/config'; // Firestore instance
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
 import { Account, AccountType } from '../../types';
 import { formatCurrency, generateId } from '../../utils';
 import { Wallet, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
@@ -9,6 +12,7 @@ import { useAccountBalance } from '../../hooks/useAccountBalance';
 
 export const AccountManager = () => {
     const { scope } = useScope();
+    const { user } = useAuth(); // Get authenticated user
     const accounts = useAccountBalance(scope);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Account>>({});
@@ -37,48 +41,56 @@ export const AccountManager = () => {
         await saveAccount();
     };
 
-    const saveAccount = async () => {
-        // ============================================
-        // DEBT SIGN CONVENTION: User-Friendly Approach
-        // ============================================
-        // User always inputs POSITIVE numbers
-        // System converts based on account type:
-        // - Credit Cards/Loans → NEGATIVE (debt)
-        // - Checking/Savings/Investment → POSITIVE (assets)
-        // ============================================
 
+    // ... (rest of state)
+
+    const saveAccount = async () => {
+        if (!user) {
+            alert("Error: No se detecta usuario logueado. Recarga la página.");
+            return;
+        }
+
+        // ... (normalization logic)
         let normalizedBalance = parseFloat(editForm.balance as any) || 0;
 
         if (editForm.type === 'Credit Card' || editForm.type === 'Loan') {
-            // Debt accounts: force negative
             normalizedBalance = -Math.abs(normalizedBalance);
         } else {
-            // Asset accounts: force positive
             normalizedBalance = Math.abs(normalizedBalance);
         }
 
-        if (editingId === 'NEW') {
-            await db.accounts.add({
+        const accountId = editingId === 'NEW' ? generateId() : editingId!;
+
+        try {
+            // Firestore Write: users/{uid}/accounts/{accountId}
+            await setDoc(doc(db, 'users', user.uid, 'accounts', accountId), {
                 ...editForm,
-                id: generateId(),
-                balance: normalizedBalance,  // Normalized based on account type
+                id: accountId,
+                balance: normalizedBalance,
                 currency: 'USD',
                 scope: scope
-            } as Account);
-        } else {
-            await db.accounts.update(editingId!, {
-                ...editForm,
-                balance: normalizedBalance  // Normalized based on account type
             });
+            // No need to manually update state, the useFirestore subscription will auto-update the list
+        } catch (error) {
+            console.error("Error saving account:", error);
+            alert("Error al guardar en la nube. Revisa tu conexión.");
+            return;
         }
+
         setEditingId(null);
         setEditForm({});
         setShowConfirmDialog(false);
     };
 
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
+        if (!user) return;
         if (confirm("¿Seguro que deseas eliminar esta cuenta? Se perderá el historial asociado.")) {
-            db.accounts.delete(id);
+            try {
+                await deleteDoc(doc(db, 'users', user.uid, 'accounts', id));
+            } catch (error) {
+                console.error("Error deleting account:", error);
+                alert("Error al eliminar.");
+            }
         }
     };
 

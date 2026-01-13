@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { Calendar, Filter, ChevronLeft, ChevronRight, Check } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { useAccountBalance } from '../../hooks/useAccountBalance'; // New Firestore Hook
 import { getStartOfMonth, getEndOfMonth, formatMonth } from '../../utils';
 
 export const FilterBar = () => {
@@ -10,10 +11,9 @@ export const FilterBar = () => {
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
 
     // Get accounts for the current scope to populate filter list
-    const accounts = useLiveQuery(() =>
-        db.accounts.filter(a => a.scope === filterState.scope || (filterState.scope === 'PERSONAL' && !a.scope)).toArray(),
-        [filterState.scope]
-    ) || [];
+    // useAccountBalance now fetches from Firestore
+    const allAccounts = useAccountBalance(filterState.scope);
+    const accounts = allAccounts.filter(a => a.scope === filterState.scope || (filterState.scope === 'PERSONAL' && !a.scope));
 
     const shiftMonth = (direction: 'next' | 'prev') => {
         const currentStart = filterState.timeframe.start;
@@ -73,8 +73,8 @@ export const FilterBar = () => {
                     <button
                         onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${filterState.selectedAccountIds.length > 0
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                             }`}
                     >
                         <Filter size={16} />
@@ -124,8 +124,8 @@ export const FilterBar = () => {
                 <button
                     onClick={() => setComparisonMode(!filterState.comparisonMode)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-all ${filterState.comparisonMode
-                            ? 'bg-purple-50 text-purple-700 border-purple-200'
-                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                         }`}
                 >
                     <span className="relative flex h-3 w-3">
