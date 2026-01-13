@@ -23,7 +23,7 @@ export const PlanningModule = ({ onNavigate }: PlanningModuleProps) => {
         return accounts
             // Use dynamicBalance (current debt) instead of static balance
             // dynamicBalance = initial balance + all transactions
-            .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && a.dynamicBalance < 0)
+            .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && Math.abs(a.dynamicBalance || 0) > 1)
             .map(a => ({
                 ...a,
                 // Convert to positive for calculation

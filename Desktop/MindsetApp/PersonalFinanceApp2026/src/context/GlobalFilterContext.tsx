@@ -19,7 +19,7 @@ interface ScopeContextType {
 
 const GlobalFilterContext = createContext<GlobalFilterContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'finmap_global_filters_v1';
+const STORAGE_KEY = 'finmap_global_filters_v2_reset';
 
 export const GlobalFilterProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     // Initial State Calculation

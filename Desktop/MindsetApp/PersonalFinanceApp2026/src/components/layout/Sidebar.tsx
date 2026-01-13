@@ -20,6 +20,8 @@ import { db } from "../../db/db";
 import { formatCurrency } from "../../utils";
 import { useScope } from '../../context/GlobalFilterContext';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
+import { daysBetween } from '../../utils/subscriptionHelpers';
+import { RecurringExpense } from '../../types';
 // import { DEMO_ACCOUNTS, DEMO_TRANSACTIONS, DEMO_GOALS, DEFAULT_CATEGORIES } from "../../utils";
 // I'll handle demo data loading inside the component for now or move it to utils.
 
@@ -37,6 +39,32 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
         // Use dynamicBalance instead of static balance
         return acc + (isLiability ? -(curr.dynamicBalance || 0) : (curr.dynamicBalance || 0));
     }, 0);
+
+    // --- Subscription Metrics ---
+    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
+        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
+        .toArray(), [scope]) || [];
+
+    const { urgentCount, reserveRequired } = React.useMemo(() => {
+        let count = 0;
+        let reserve = 0;
+        const today = new Date().toISOString().split('T')[0];
+
+        recurringExpenses.forEach(exp => {
+            if (!exp.active) return;
+            const days = daysBetween(today, exp.nextDueDate || '');
+
+            // Urgency Badge Counter (Overdue or < 30 days)
+            if (days < 30) count++;
+
+            // Smart Reserve Calculation
+            if (exp.frequency !== 'MONTHLY' && days >= 0) {
+                const monthsDisp = Math.max(1, Math.floor(days / 30));
+                reserve += exp.amount / monthsDisp;
+            }
+        });
+        return { urgentCount: count, reserveRequired: reserve };
+    }, [recurringExpenses]);
 
     const loadDemoData = async () => {
         if (window.confirm("Esto reemplazará tus datos actuales con datos de demostración. ¿Continuar?")) {
@@ -71,9 +99,14 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                 <NavItem icon={<Calendar size={18} />} label="Proyección" active={currentView === 'cashflow'} onClick={() => onNavigate('cashflow')} />
                 <NavItem icon={<TrendingUp size={18} />} label="Inversiones" active={currentView === 'investment'} onClick={() => onNavigate('investment')} />
                 <NavItem icon={<Target size={18} />} label="Planificación Deuda" active={currentView === 'planning'} onClick={() => onNavigate('planning')} />
-                <NavItem icon={<FileText size={18} />} label="Transacciones" active={currentView === "transactions"} onClick={() => onNavigate("transactions")} />
                 <NavItem icon={<Upload size={18} />} label="Importar Datos" active={currentView === "import"} onClick={() => onNavigate("import")} />
-                <NavItem icon={<Settings size={18} />} label="Configuración" active={currentView === "settings"} onClick={() => onNavigate("settings")} />
+                <NavItem
+                    icon={<Settings size={18} />}
+                    label="Configuración"
+                    active={currentView === "settings"}
+                    onClick={() => onNavigate("settings")}
+                    badge={urgentCount > 0 ? urgentCount : undefined}
+                />
             </nav>
 
             <div className="p-4 border-t border-slate-800 space-y-3">
@@ -96,12 +129,24 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                         <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Deuda Total</div>
                         <div className="font-bold text-rose-400">
                             {formatCurrency(accounts
-                                .filter(a => ['Credit Card', 'Loan'].includes(a.type))
                                 // Debt Convention: Always show debt as POSITIVE
+                                .filter(a => ['Credit Card', 'Loan'].includes(a.type))
                                 .reduce((sum, a) => sum + Math.abs(a.dynamicBalance || 0), 0)
                             )}
                         </div>
                     </div>
+
+                    {/* Suggested Reserve */}
+                    {reserveRequired > 0 && (
+                        <div className="flex justify-between items-center border-t border-slate-700/50 pt-2 animate-in fade-in">
+                            <div className="text-[10px] text-indigo-400 font-medium uppercase tracking-wider flex items-center gap-1">
+                                <PiggyBank size={12} /> Reserva Info.
+                            </div>
+                            <div className="font-bold text-indigo-400">
+                                {formatCurrency(reserveRequired)}/m
+                            </div>
+                        </div>
+                    )}
 
                     {/* Credit Available (Only for CCs) */}
                     <div className="flex justify-between items-center border-t border-slate-700/50 pt-2">
@@ -110,8 +155,6 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                             {formatCurrency(accounts
                                 .filter(a => a.type === 'Credit Card')
                                 .reduce((sum, a) => {
-                                    // Correct Formula: Available = Limit - Absolute(Debt)
-                                    // If dynamicBalance = -500 (debt), then debt = 500
                                     const debt = Math.abs(a.dynamicBalance || 0);
                                     const limit = a.limit || 0;
                                     return sum + Math.max(0, limit - debt);
@@ -119,14 +162,13 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                             )}
                         </div>
                     </div>
-
                 </div>
             </div>
         </aside>
     );
 };
 
-const NavItem = ({ icon, label, active, onClick }: any) => (
+const NavItem = ({ icon, label, active, onClick, badge }: any) => (
     <button
         onClick={onClick}
         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${active
@@ -136,7 +178,12 @@ const NavItem = ({ icon, label, active, onClick }: any) => (
     >
         {icon}
         <span>{label}</span>
-        {active && <ChevronRight size={14} className="ml-auto opacity-50" />}
+        {badge && (
+            <span className="ml-auto bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border border-rose-400 shadow-sm animate-pulse">
+                {badge}
+            </span>
+        )}
+        {!badge && active && <ChevronRight size={14} className="ml-auto opacity-50" />}
     </button>
 );
 

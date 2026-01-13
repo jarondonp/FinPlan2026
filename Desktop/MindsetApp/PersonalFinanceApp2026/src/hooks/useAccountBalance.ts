@@ -7,16 +7,11 @@ export interface AccountWithDynamicBalance extends Account {
 }
 
 export const useAccountBalance = (scope: 'PERSONAL' | 'BUSINESS') => {
-    // 1. Fetch Accounts
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    // 1. Fetch Accounts (NUCLEAR OPTION: NO FILTER)
+    const accounts = useLiveQuery(() => db.accounts.toArray(), []) || [];
 
-    // 2. Fetch All Transactions for these accounts
-    // optimization: purely for balance calculation, we need all verified/provisional txs
-    const transactions = useLiveQuery(() => db.transactions
-        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
-        .toArray(), [scope]) || [];
+    // 2. Fetch All Transactions (NUCLEAR OPTION: NO FILTER)
+    const transactions = useLiveQuery(() => db.transactions.toArray(), []) || [];
 
     // 3. Calculate Dynamic Balance for each account
     const accountsWithBalance: AccountWithDynamicBalance[] = accounts.map(acc => {

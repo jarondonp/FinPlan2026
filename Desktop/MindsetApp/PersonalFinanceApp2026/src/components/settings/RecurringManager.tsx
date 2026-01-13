@@ -21,7 +21,19 @@ export const RecurringManager = () => {
         .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
         .toArray(), [scope]) || [];
 
+    // Sort expenses by urgency
+    const sortedExpenses = [...expenses].sort((a, b) => {
+        const today = new Date().toISOString().split('T')[0];
+        const daysA = daysBetween(today, a.nextDueDate || '');
+        const daysB = daysBetween(today, b.nextDueDate || '');
+        return daysA - daysB;
+    });
+
+
+
     const [newIncome, setNewIncome] = useState<Partial<IncomeSource>>({ frequency: 'MONTHLY' });
+    const [editingId, setEditingId] = useState<string | null>(null);
+
     const [newExpense, setNewExpense] = useState<Partial<RecurringExpense>>({
         active: true,
         autoPay: false,
@@ -72,7 +84,30 @@ export const RecurringManager = () => {
     const deleteIncome = (id: string) => db.incomeSources.delete(id);
 
     // --- Expense Handlers ---
-    const addExpense = async () => {
+    const handleEdit = (expense: RecurringExpense) => {
+        setEditingId(expense.id);
+        setNewExpense({
+            ...expense,
+            nextDueDate: expense.nextDueDate || '',
+            startDate: expense.startDate || new Date().toISOString().split('T')[0],
+            endDate: expense.endDate
+        });
+        // Optional: Scroll to top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const cancelEdit = () => {
+        setEditingId(null);
+        setNewExpense({
+            active: true,
+            autoPay: false,
+            frequency: 'MONTHLY',
+            startDate: new Date().toISOString().split('T')[0],
+            nextDueDate: '',
+        });
+    };
+
+    const saveExpense = async () => {
         if (!newExpense.name || !newExpense.amount || !newExpense.nextDueDate || !newExpense.category) return;
         const amount = parseFloat(newExpense.amount.toString());
 
@@ -88,9 +123,8 @@ export const RecurringManager = () => {
         const nextDue = new Date(newExpense.nextDueDate);
         const dueDay = nextDue.getDate();
 
-        await db.recurringExpenses.add({
+        const expenseData = {
             ...newExpense,
-            id: generateId(),
             amount: amount,
             dueDay: dueDay, // Keep for backward compat
             frequency: newExpense.frequency || 'MONTHLY',
@@ -98,15 +132,16 @@ export const RecurringManager = () => {
             nextDueDate: newExpense.nextDueDate,
             endDate: newExpense.endDate || undefined,
             scope: scope
-        } as RecurringExpense);
+        } as RecurringExpense;
 
-        setNewExpense({
-            active: true,
-            autoPay: false,
-            frequency: 'MONTHLY',
-            startDate: new Date().toISOString().split('T')[0],
-            nextDueDate: '',
-        });
+        if (editingId) {
+            await db.recurringExpenses.update(editingId, expenseData);
+        } else {
+            expenseData.id = generateId();
+            await db.recurringExpenses.add(expenseData);
+        }
+
+        cancelEdit(); // Reset form
     };
 
     const deleteExpense = (id: string) => db.recurringExpenses.delete(id);
@@ -197,7 +232,13 @@ export const RecurringManager = () => {
                     </h3>
                     <p className="text-sm text-slate-500 mb-6">Pagos fijos (Alquiler, Internet, Seguros) para calcular tu "Piso de Gastos".</p>
 
-                    <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6">
+                    <div className={`space-y-4 p-4 rounded-xl border mb-6 transition-colors ${editingId ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                        {editingId && (
+                            <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2 flex justify-between items-center">
+                                <span>✏️ Editando Gasto</span>
+                                <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 underline">Cancelar</button>
+                            </div>
+                        )}
                         <input
                             placeholder="Nombre (Ej. Netflix)"
                             className="w-full px-3 py-2 border rounded-lg text-sm"
@@ -221,16 +262,48 @@ export const RecurringManager = () => {
                                 {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                             </select>
                         </div>
+
+                        {/* Frequency Selector */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500">Frecuencia</label>
+                            <select
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                value={newExpense.frequency || 'MONTHLY'}
+                                onChange={e => setNewExpense({ ...newExpense, frequency: e.target.value as RecurringFrequency })}
+                            >
+                                <option value="MONTHLY">📅 Mensual</option>
+                                <option value="QUARTERLY">📅 Trimestral (cada 3 meses)</option>
+                                <option value="SEMI_ANNUAL">📅 Semestral (cada 6 meses)</option>
+                                <option value="ANNUAL">📅 Anual (cada año)</option>
+                                <option value="BIENNIAL">📅 Bianual (cada 2 años)</option>
+                                <option value="TRIENNIAL">📅 Trianual (cada 3 años)</option>
+                            </select>
+                        </div>
+
+                        {/* Next Due Date */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500">Próximo Vencimiento</label>
+                            <input
+                                type="date"
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                value={newExpense.nextDueDate || ''}
+                                onChange={e => setNewExpense({ ...newExpense, nextDueDate: e.target.value })}
+                            />
+                        </div>
+
+                        {/* Optional End Date */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500">Finaliza en (opcional)</label>
+                            <input
+                                type="date"
+                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                value={newExpense.endDate || ''}
+                                onChange={e => setNewExpense({ ...newExpense, endDate: e.target.value || undefined })}
+                                placeholder="Dejar vacío si no expira"
+                            />
+                        </div>
+
                         <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-slate-500">Vence el día:</span>
-                                <input
-                                    type="number" placeholder="1-31" min="1" max="31"
-                                    className="w-16 px-2 py-1 border rounded text-sm text-center"
-                                    value={newExpense.dueDay || ''}
-                                    onChange={e => setNewExpense({ ...newExpense, dueDay: parseInt(e.target.value) })}
-                                />
-                            </div>
                             <div className="flex items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -252,28 +325,97 @@ export const RecurringManager = () => {
                             </div>
                         )}
 
-                        <button onClick={addExpense} className="w-full py-2 bg-rose-600 text-white rounded-lg font-bold text-sm hover:bg-rose-700">
-                            Agregar Recurrente
-                        </button>
+                        <div className="flex gap-2">
+                            {editingId && (
+                                <button onClick={cancelEdit} className="w-1/3 py-2 bg-slate-200 text-slate-700 rounded-lg font-bold text-sm hover:bg-slate-300">
+                                    Cancelar
+                                </button>
+                            )}
+                            <button
+                                onClick={saveExpense}
+                                className={`w-full py-2 rounded-lg font-bold text-sm transition-all ${editingId ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-rose-600 hover:bg-rose-700 text-white'}`}
+                            >
+                                {editingId ? 'Guardar Cambios' : 'Agregar Recurrente'}
+                            </button>
+                        </div>
                     </div>
 
                     <div className="space-y-3">
-                        {expenses.map(exp => (
-                            <div key={exp.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-slate-50">
-                                <div>
-                                    <div className="font-bold text-slate-800">{exp.name}</div>
-                                    <div className="text-xs text-slate-500 flex items-center gap-2">
-                                        <span>Día {exp.dueDay}</span>
-                                        {exp.autoPay && <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-bold">Auto</span>}
-                                        <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px]">{exp.category}</span>
+                        {sortedExpenses.map(exp => {
+                            const today = new Date().toISOString().split('T')[0];
+                            const daysUntil = daysBetween(today, exp.nextDueDate || '');
+                            const badge = getUrgencyBadge(daysUntil);
+                            const frequencyLabel = getFrequencyLabel(exp.frequency || 'MONTHLY');
+
+                            // Calculate reserve suggestion for non-monthly items
+                            let reserveSuggestion = null;
+                            if (exp.frequency !== 'MONTHLY' && (badge.level === 'PRÓXIMO' || badge.level === 'PLANEABLE')) {
+                                const monthsDisp = Math.max(1, Math.floor(daysUntil / 30));
+                                const reserveAmount = exp.amount / monthsDisp;
+                                reserveSuggestion = formatCurrency(reserveAmount) + '/mes';
+                            }
+
+                            return (
+                                <div key={exp.id} className="p-3 border rounded-lg hover:bg-slate-50 transition-colors">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="font-bold text-slate-800">{exp.name}</div>
+                                                {/* Urgency Badge */}
+                                                <div className={`text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-${badge.color}-100 text-${badge.color}-700 border border-${badge.color}-200`}>
+                                                    <span>{badge.icon}</span>
+                                                    <span>{badge.label}</span>
+                                                    {daysUntil >= 0 && <span className="opacity-75">({daysUntil}d)</span>}
+                                                </div>
+                                            </div>
+                                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                                                <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 border border-slate-200">
+                                                    {frequencyLabel}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    📅 {exp.nextDueDate}
+                                                </span>
+                                                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${exp.active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                                    {exp.active ? '🟢 Activo' : '⚪ Pausado'}
+                                                </span>
+                                            </div>
+
+                                            {/* Smart Reserve Suggestion */}
+                                            {reserveSuggestion && (
+                                                <div className="text-xs text-indigo-600 font-medium mt-1 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded w-fit">
+                                                    💡 Sugerencia: Reservar {reserveSuggestion}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-mono font-bold text-rose-600">{formatCurrency(exp.amount)}</div>
+                                            <div className="text-[10px] text-slate-400 mt-1">{exp.category}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
+                                        <button
+                                            onClick={() => handleEdit(exp)}
+                                            className="text-indigo-500 hover:text-indigo-600 text-xs flex items-center gap-1 px-2 py-1 hover:bg-indigo-50 rounded transition-colors"
+                                        >
+                                            ✏️ Editar
+                                        </button>
+                                        <button
+                                            onClick={() => deleteExpense(exp.id)}
+                                            className="text-slate-400 hover:text-rose-500 text-xs flex items-center gap-1 px-2 py-1 hover:bg-rose-50 rounded transition-colors"
+                                        >
+                                            <Trash2 size={12} /> Eliminar
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <span className="font-mono font-bold text-rose-600">{formatCurrency(exp.amount)}</span>
-                                    <button onClick={() => deleteExpense(exp.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={16} /></button>
-                                </div>
+                            );
+                        })}
+
+                        {sortedExpenses.length === 0 && (
+                            <div className="text-center py-8 text-slate-400 text-sm italic">
+                                No hay gastos recurrentes registrados
                             </div>
-                        ))}
+                        )}
                     </div>
                 </div>
             </div>

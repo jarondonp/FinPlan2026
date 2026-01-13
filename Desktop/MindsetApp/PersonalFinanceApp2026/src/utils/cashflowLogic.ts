@@ -31,7 +31,7 @@ export const calculateDailyBalances = (
         .reduce((total, cat) => {
             const catLimit = cat.budgetLimit || 0;
             const catFixed = expenses
-                .filter(e => e.category === cat.name && e.active)
+                .filter(e => e.category === cat.name && e.active && (e.frequency === 'MONTHLY' || !e.frequency))
                 .reduce((sum, e) => sum + e.amount, 0);
 
             const variablePart = Math.max(0, catLimit - catFixed);
@@ -56,7 +56,19 @@ export const calculateDailyBalances = (
 
         // Check Fixed Expenses
         const dayFixedExpenses = expenses.filter(exp => {
-            return exp.active && exp.dueDay === dayOfMonth;
+            if (!exp.active) return false;
+
+            // Handle Monthly Frequencies
+            if (exp.frequency === 'MONTHLY') {
+                // Determine the day to trigger
+                // Prefer nextDueDate day, fallback to dueDay
+                const dueDay = exp.nextDueDate ? new Date(exp.nextDueDate).getDate() : exp.dueDay;
+                return dueDay === dayOfMonth;
+            }
+
+            // Handle Non-Monthly (Annual, Quarterly, etc.)
+            // Only show if the projection date MATCHES the nextDueDate
+            return exp.nextDueDate === dateStr;
         }).map(exp => ({ name: exp.name, amount: exp.amount, type: 'fixed' as const }));
 
         // Check Credit Card Minimum Payments

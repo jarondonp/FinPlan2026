@@ -1,22 +1,33 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
-import { useGlobalFilter } from '../../context/GlobalFilterContext';
+import { useGlobalFilter, useScope } from '../../context/GlobalFilterContext';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard } from 'lucide-react';
 import { MonthStatusBadge } from '../closing/MonthStatusBadge';
+import { AiInsightWidget } from './AiInsightWidget';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
+import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel } from '../../utils/subscriptionHelpers';
+import { RecurringExpense } from '../../types';
+import { BackupManager } from '../settings/BackupManager';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
 }
 
 export const Dashboard = ({ onNavigate }: DashboardProps) => {
-    const { filterState } = useGlobalFilter();
-    const { scope, timeframe, selectedAccountIds } = filterState;
+    const { scope } = useScope();
+    const {
+        filterState,
+        setScope,
+        setTimeframe,
+        toggleAccount,
+        setComparisonMode
+    } = useGlobalFilter();
+    const { timeframe, selectedAccountIds } = filterState;
 
     // Data Fetching
     const transactions = useLiveQuery(() => db.transactions
@@ -124,13 +135,62 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
+    // --- Subscription Alerts Logic ---
+    const subscriptionAlerts = useMemo(() => {
+        const today = new Date().toISOString().split('T')[0];
+        const critical: { exp: RecurringExpense, days: number }[] = [];
+        const upcomingNonMonthly: { exp: RecurringExpense, days: number, reserve: number }[] = [];
+
+        recurringExpenses.forEach(exp => {
+            if (!exp.active) return;
+            const days = daysBetween(today, exp.nextDueDate || '');
+
+            // Critical Alerts (Overdue or Urgent < 30 days) of ANY frequency
+            if (days < 30) {
+                critical.push({ exp, days });
+            }
+
+            // Upcoming Annual/Non-Monthly (Show if > 0 days and it is not monthly)
+            // We want to highlight these for planning reserves
+            if (exp.frequency !== 'MONTHLY' && days >= 0) {
+                const monthsDisp = Math.max(1, Math.floor(days / 30));
+                const reserve = exp.amount / monthsDisp;
+                upcomingNonMonthly.push({ exp, days, reserve });
+            }
+        });
+
+        return { critical, upcomingNonMonthly };
+    }, [recurringExpenses]);
+
     return (
         <div className={`p-8 max-w-7xl mx-auto animate-in fade-in duration-500 ${scope === 'BUSINESS' ? 'bg-slate-50/50 min-h-screen' : ''}`}>
+            <BackupManager />
             <h1 className="text-3xl font-bold text-slate-900 mb-8 flex items-center gap-3">
                 Dashboard
                 {scope === 'BUSINESS' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full uppercase tracking-wider border border-blue-200">Empresa</span>}
                 <MonthStatusBadge />
             </h1>
+
+            {/* Critical Subscription Banner */}
+            {subscriptionAlerts.critical.length > 0 && (
+                <div className="mb-6 bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-center justify-between shadow-sm animate-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                            <AlertTriangle size={24} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-rose-800">Tienes {subscriptionAlerts.critical.length} pagos urgentes o vencidos</h3>
+                            <p className="text-xs text-rose-600">Revisa tus suscripciones para evitar cortes o recargos.</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => onNavigate('settings:recurring')}
+                        className="px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 transition-colors"
+                    >
+                        Ver Pagos
+                    </button>
+                </div>
+            )}
 
             {/* Consistency Alert Area */}
             {consistencyIssues.length > 0 && (
@@ -176,6 +236,9 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
             )}
 
 
+
+            {/* AI Insight Widget - Shows for both scopes */}
+            <AiInsightWidget onNavigate={onNavigate} />
 
             {/* Business KPI Header */}
             {scope === 'BUSINESS' && (
@@ -298,6 +361,51 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                         </div>
                         <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
                     </div>
+
+                    {/* NEW: Upcoming Annual Expenses Widget */}
+                    {subscriptionAlerts.upcomingNonMonthly.length > 0 && (
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm md:col-span-2">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                                        <Briefcase size={20} />
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Próximos Gastos Anuales</span>
+                                </div>
+                                <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-full text-slate-500 font-bold border border-slate-200">
+                                    Reserva Sugerida
+                                </span>
+                            </div>
+
+                            <div className="space-y-3">
+                                {subscriptionAlerts.upcomingNonMonthly.slice(0, 3).map((item, idx) => (
+                                    <div key={idx} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                                        <div>
+                                            <div className="font-bold text-slate-800 text-sm">{item.exp.name}</div>
+                                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                <span>{getFrequencyLabel(item.exp.frequency)}</span>
+                                                <span className={`${item.days <= 60 ? 'text-amber-600 font-medium' : ''}`}>
+                                                    Vence en {item.days} días
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-mono font-bold text-indigo-600">{formatCurrency(item.reserve)}/mes</div>
+                                            <div className="text-[10px] text-slate-400">Total: {formatCurrency(item.exp.amount)}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {subscriptionAlerts.upcomingNonMonthly.length > 3 && (
+                                <button
+                                    onClick={() => onNavigate('settings:recurring')}
+                                    className="w-full mt-3 text-xs text-center text-slate-500 hover:text-indigo-600 py-1"
+                                >
+                                    Ver {subscriptionAlerts.upcomingNonMonthly.length - 3} más...
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 

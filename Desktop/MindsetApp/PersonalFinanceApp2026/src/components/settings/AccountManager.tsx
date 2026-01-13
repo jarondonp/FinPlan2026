@@ -230,6 +230,10 @@ const AccountEditor = ({ form, setForm, onSave, onCancel }: any) => {
                             <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.limit || 0} onChange={e => setForm({ ...form, limit: parseFloat(e.target.value) })} />
                         </div>
                         <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-1">Pago Mínimo Actual</label>
+                            <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.minPayment || 0} onChange={e => setForm({ ...form, minPayment: parseFloat(e.target.value) })} placeholder="Ej. 35" />
+                        </div>
+                        <div>
                             <label className="block text-xs font-bold text-slate-500 mb-1">Día de Corte (1-31)</label>
                             <input type="number" className="w-full px-3 py-2 border rounded-lg text-sm" value={form.closingDay || ""} onChange={e => setForm({ ...form, closingDay: parseFloat(e.target.value) })} />
                         </div>
