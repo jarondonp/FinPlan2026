@@ -1,7 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info } from 'lucide-react';
-// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
-// import { db } from '../../db/db'; // Removed
+import React, { useState, useMemo, useEffect } from 'react';
+import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +8,7 @@ import { formatCurrency, getRandomColor, generateId } from '../../utils';
 import { Goal, CategoryDef } from '../../types';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { closingService } from '../../services/ClosingService';
+import { hybridBudgetService } from '../../services/HybridBudgetService';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;
@@ -20,98 +19,70 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     const { scope, timeframe } = filterState;
     const { user } = useAuth();
 
-    // Cloud Data Fetching
-    const { data: allTransactions } = useFirestore<any>('transactions');
-    const transactions = (allTransactions || []).filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope));
+    // Data State
+    const [budgetData, setBudgetData] = useState<any[]>([]);
+    const [projectedIncome, setProjectedIncome] = useState(0);
+    const [totalBudgeted, setTotalBudgeted] = useState(0);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const { data: allCategories } = useFirestore<CategoryDef>('categories');
-    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
+    // UI State for Details
+    const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+    const [detailView, setDetailView] = useState<{ category: string, type: 'fixed' | 'reserved' | 'variable' } | null>(null);
 
     const { data: allGoals } = useFirestore<Goal>('goals');
     const goals = (allGoals || []).filter(g => g.scope === scope || (scope === 'PERSONAL' && !g.scope));
 
-    const { data: allRecurring } = useFirestore<any>('recurringExpenses');
-    const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
-
-    // State
+    // UI State
     const [isAddingGoal, setIsAddingGoal] = useState(false);
     const [newGoal, setNewGoal] = useState<Partial<Goal>>({});
+
+    const [isMonthClosed, setIsMonthClosed] = useState(false);
     const [isEditingBudgets, setIsEditingBudgets] = useState(false);
-    const [isMonthClosed, setIsMonthClosed] = useState(false); // Protection state
 
-    // Check Status
-    React.useEffect(() => {
-        const currentBudgetMonth = new Date(); // Today
-        closingService.getStatus(currentBudgetMonth, scope).then(status => {
+    // Fetch Hybrid Budget Data
+    useEffect(() => {
+        const fetchBudget = async () => {
+            setIsLoading(true);
+            const date = timeframe.start ? new Date(timeframe.start) : new Date();
+
+            const [data, income] = await Promise.all([
+                hybridBudgetService.getBudgetBreakdown(date, scope),
+                hybridBudgetService.getProjectedIncome(date, scope)
+            ]);
+
+            setBudgetData(data);
+            setProjectedIncome(income);
+            setTotalBudgeted(data.reduce((sum, item) => sum + item.totalLimit, 0));
+
+            setIsLoading(false);
+
+            // Check Month Status
+            const status = await closingService.getStatus(date, scope);
             setIsMonthClosed(status === 'CLOSED' || status === 'LOCKED');
-        });
-    }, [scope]);
-
-    // Budget Calculations
-    const currentDateRange = useMemo(() => {
-        const start = timeframe.start ? new Date(timeframe.start) : new Date();
-        const monthStr = start.toISOString().slice(0, 7); // YYYY-MM
-        return {
-            monthStr,
-            startStr: timeframe.start,
-            endStr: timeframe.end
         };
-    }, [timeframe]);
+        fetchBudget();
+    }, [scope, timeframe]);
 
-    const budgetData = useMemo(() => {
-        const spentMap: Record<string, number> = {};
+    const handleUpdateVariable = async (catName: string, amount: number) => {
+        if (!user || isMonthClosed) return;
+        const date = timeframe.start ? new Date(timeframe.start) : new Date();
+        await hybridBudgetService.setVariableBudget(date, catName, scope, amount);
 
-        transactions
-            .filter(t => {
-                // Filter by date range from global context
-                if (currentDateRange.startStr && currentDateRange.endStr) {
-                    const tDate = t.date; // String YYYY-MM-DD
-                    const start = currentDateRange.startStr instanceof Date ? currentDateRange.startStr.toISOString().split('T')[0] : currentDateRange.startStr;
-                    const end = currentDateRange.endStr instanceof Date ? currentDateRange.endStr.toISOString().split('T')[0] : currentDateRange.endStr;
-                    return tDate >= start && tDate <= end;
+        // Optimistic Update
+        setBudgetData(prev => {
+            const newData = prev.map(item => {
+                if (item.category === catName) {
+                    return {
+                        ...item,
+                        variable: amount,
+                        totalLimit: item.fixed + item.reserved + amount
+                    };
                 }
-                // Fallback to month string check
-                return t.date.startsWith(currentDateRange.monthStr);
-            })
-            .filter(t => t.type === 'EXPENSE')
-            .forEach(t => {
-                spentMap[t.category] = (spentMap[t.category] || 0) + Math.abs(t.amount);
+                return item;
             });
-
-        // Fixed Expenses Map (Sum of all active recurring expenses per category)
-        const fixedMap: Record<string, number> = {};
-        recurringExpenses.forEach(r => {
-            if (r.active && r.category) {
-                fixedMap[r.category] = (fixedMap[r.category] || 0) + r.amount;
-            }
+            setTotalBudgeted(newData.reduce((sum, item) => sum + item.totalLimit, 0));
+            return newData;
         });
-
-        return categories
-            .map(cat => ({
-                ...cat,
-                spent: spentMap[cat.name] || 0,
-                limit: cat.budgetLimit || 0,
-                minRequired: fixedMap[cat.name] || 0
-            }))
-            .sort((a, b) => (b.limit > 0 ? b.spent / b.limit : 0) - (a.limit > 0 ? a.spent / a.limit : 0));
-    }, [categories, transactions, currentDateRange, recurringExpenses]);
-
-    const handleUpdateLimit = async (catName: string, newLimit: number) => {
-        if (!user) return;
-        try {
-            await setDoc(doc(db, 'users', user.uid, 'categories', catName), { budgetLimit: newLimit }, { merge: true });
-        } catch (e) {
-            console.error("Error updating limit", e);
-        }
-    };
-
-    const handleToggleVisibility = async (catName: string, currentHidden?: boolean) => {
-        if (!user) return;
-        try {
-            await setDoc(doc(db, 'users', user.uid, 'categories', catName), { isHidden: !currentHidden }, { merge: true });
-        } catch (e) {
-            console.error("Error toggling visibility", e);
-        }
     };
 
     const handleAddGoal = async () => {
@@ -151,17 +122,45 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     return (
         <div className="p-8 max-w-7xl mx-auto animate-in fade-in duration-500 pb-20">
             <header className="mb-8">
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center gap-3 mb-4">
                     <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
                         <PiggyBank size={24} />
                     </div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Presupuesto y Metas</h1>
+                    <div>
+                        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Presupuesto y Metas</h1>
+                        <p className="text-slate-500 text-sm">Define tus límites de gasto (Fijos + Reservas + Variables) y construye patrimonio.</p>
+                    </div>
                 </div>
-                <p className="text-slate-500">Define tus límites de gasto y construye tu patrimonio futuro.</p>
+
+                {/* Zero-Based Summary Card */}
+                {!isLoading && (
+                    <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div className="flex-1 w-full text-center md:text-left">
+                            <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Ingresos Proyectados</span>
+                            <div className="text-2xl font-mono font-bold text-emerald-400">{formatCurrency(projectedIncome)}</div>
+                        </div>
+
+                        <div className="hidden md:block h-10 w-px bg-slate-700"></div>
+
+                        <div className="flex-1 w-full text-center md:text-left">
+                            <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Total Asignado</span>
+                            <div className="text-2xl font-mono font-bold text-white">{formatCurrency(totalBudgeted)}</div>
+                        </div>
+
+                        <div className="hidden md:block h-10 w-px bg-slate-700"></div>
+
+                        <div className="flex-1 w-full text-center md:text-left">
+                            <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Por Asignar</span>
+                            <div className={`text-2xl font-mono font-bold ${projectedIncome - totalBudgeted < 0 ? 'text-rose-400' : 'text-indigo-400'}`}>
+                                {formatCurrency(projectedIncome - totalBudgeted)}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* --- Goals Section --- */}
+                {/* --- Goals Section (Unchanged) --- */}
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -208,17 +207,16 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                     </div>
                 </div>
 
-                {/* --- Budgets Section --- */}
+                {/* --- Hybrid Budgets Section --- */}
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <PiggyBank size={18} className="text-emerald-600" /> Presupuesto
+                            <PiggyBank size={18} className="text-emerald-600" /> Presupesto Híbrido
                         </h3>
                         <div className="flex gap-2">
-                            {/* Month Status Protection */}
                             {isMonthClosed ? (
-                                <span className="text-xs font-bold text-slate-400 px-3 py-1.5 bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200 cursor-not-allowed" title="El mes está cerrado, no se puede editar el presupuesto.">
-                                    <AlertTriangle size={12} /> Lectura
+                                <span className="text-xs font-bold text-slate-400 px-3 py-1.5 bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200 cursor-not-allowed">
+                                    <AlertTriangle size={12} /> Mes Cerrado - Lectura
                                 </span>
                             ) : (
                                 <button onClick={() => setIsEditingBudgets(!isEditingBudgets)} className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors border ${isEditingBudgets ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
@@ -229,83 +227,149 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                     </div>
 
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="divide-y divide-slate-100">
-                            {budgetData.map(cat => {
-                                if (!isEditingBudgets && cat.isHidden) return null;
+                        {isLoading ? (
+                            <div className="p-8 text-center text-slate-500">Cargando presupuesto...</div>
+                        ) : (
+                            <div className="divide-y divide-slate-100">
+                                {budgetData.map(cat => {
+                                    const totalLimit = cat.totalLimit;
+                                    const percentage = totalLimit > 0 ? (cat.spent / totalLimit) * 100 : 0;
 
-                                const percentage = cat.limit > 0 ? (cat.spent / cat.limit) * 100 : 0;
-                                let barColor = "bg-emerald-500";
-                                let textColor = "text-emerald-600";
-                                if (percentage > 80) { barColor = "bg-amber-500"; textColor = "text-amber-600"; }
-                                if (percentage > 100) { barColor = "bg-rose-500"; textColor = "text-rose-600"; }
+                                    // Segment Percentages for Bar
+                                    const pFixed = totalLimit > 0 ? (cat.fixed / totalLimit) * 100 : 0;
+                                    const pReserve = totalLimit > 0 ? (cat.reserved / totalLimit) * 100 : 0;
+                                    const pVariable = totalLimit > 0 ? (cat.variable / totalLimit) * 100 : 0;
 
-                                // Validations
-                                const isLimitTooLow = cat.limit > 0 && cat.limit < cat.minRequired;
+                                    const isExpanded = expandedCategory === cat.category;
 
-                                return (
-                                    <div key={cat.name} className={`p-4 hover:bg-slate-50 transition-colors ${isEditingBudgets ? 'bg-slate-50/50' : ''} ${cat.isHidden ? 'opacity-50 grayscale' : ''}`}>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <div className="flex items-center gap-3">
-                                                {isEditingBudgets && (
-                                                    <button
-                                                        onClick={() => handleToggleVisibility(cat.name, cat.isHidden)}
-                                                        className={`p-1.5 rounded-md transition-colors ${cat.isHidden ? 'text-slate-400 hover:bg-slate-200' : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'}`}
-                                                        title={cat.isHidden ? "Mostrar en presupuesto" : "Ocultar del presupuesto"}
-                                                    >
-                                                        {cat.isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
-                                                    </button>
-                                                )}
-                                                <div className={`w-2 h-2 rounded-full ${cat.color.split(' ')[0].replace('bg-', 'bg-')}`}></div>
-                                                <span className={`font-bold text-sm ${cat.isHidden ? 'text-slate-400 line-through decoration-slate-300' : 'text-slate-700'}`}>{cat.name}</span>
-                                                {cat.minRequired > 0 && isEditingBudgets && (
-                                                    <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 flex items-center gap-1" title="Gastos Fijos Recurrentes">
-                                                        <Info size={10} /> Fijos: {formatCurrency(cat.minRequired)}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="text-right flex items-center gap-2">
-                                                <span className={`font-mono font-bold text-sm ${cat.isHidden ? 'text-slate-400' : textColor}`}>{formatCurrency(cat.spent)}</span>
-                                                <span className="text-xs text-slate-400">/</span>
-                                                {isEditingBudgets ? (
-                                                    <div className="relative">
-                                                        <span className="absolute left-2 top-1.5 text-xs text-slate-400">$</span>
-                                                        <input
-                                                            type="number"
-                                                            disabled={cat.isHidden}
-                                                            className={`w-24 pl-4 pr-1 py-1 text-xs border focus:ring-2 rounded bg-white font-bold text-slate-700 disabled:opacity-50 disabled:bg-slate-100 ${isLimitTooLow ? 'border-rose-300 focus:ring-rose-500 text-rose-600' : 'border-indigo-300 focus:ring-indigo-500'}`}
-                                                            value={cat.limit}
-                                                            onChange={(e) => handleUpdateLimit(cat.name, parseFloat(e.target.value) || 0)}
-                                                        />
-                                                        {isLimitTooLow && (
-                                                            <div className="absolute top-8 right-0 bg-rose-600 text-white text-[10px] px-2 py-1 rounded shadow-lg z-10 whitespace-nowrap animate-in fade-in slide-in-from-top-1">
-                                                                Mínimo sugerido: {formatCurrency(cat.minRequired)}
-                                                            </div>
-                                                        )}
+                                    return (
+                                        <div key={cat.category} className="hover:bg-slate-50 transition-colors">
+                                            {/* Main Row */}
+                                            <div
+                                                className="p-4 cursor-pointer"
+                                                onClick={() => setExpandedCategory(isExpanded ? null : cat.category)}
+                                            >
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="font-bold text-slate-700">{cat.category}</span>
+                                                    <div className="text-right">
+                                                        <span className={`font-mono font-bold text-sm ${cat.spent > cat.totalLimit ? 'text-rose-600' : 'text-slate-700'}`}>
+                                                            {formatCurrency(cat.spent)}
+                                                        </span>
+                                                        <span className="text-xs text-slate-400 mx-1">/</span>
+                                                        <span className="text-xs font-medium text-slate-500">{formatCurrency(cat.totalLimit)}</span>
                                                     </div>
-                                                ) : (
-                                                    <span className="text-xs font-medium text-slate-500">{formatCurrency(cat.limit)}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {!cat.isHidden && (
-                                            <div className="w-full bg-slate-100 rounded-full h-2 relative">
-                                                {/* Fixed Portion Indicator */}
-                                                {cat.minRequired > 0 && cat.limit > 0 && (
+                                                </div>
+
+                                                {/* Stacked Progress Bar */}
+                                                <div className="w-full bg-slate-100 rounded-full h-3 relative flex overflow-hidden">
+                                                    {/* Fixed - Dark Blue */}
+                                                    <div className="bg-slate-700 h-full" style={{ width: `${pFixed}%` }} title={`Fijo: ${formatCurrency(cat.fixed)}`}></div>
+                                                    {/* Reserved - Purple */}
+                                                    <div className="bg-violet-500 h-full" style={{ width: `${pReserve}%` }} title={`Reserva: ${formatCurrency(cat.reserved)}`}></div>
+                                                    {/* Variable - Green */}
+                                                    <div className="bg-emerald-500 h-full" style={{ width: `${pVariable}%` }} title={`Variable: ${formatCurrency(cat.variable)}`}></div>
+
+                                                    {/* Spending Marker Line */}
                                                     <div
-                                                        className="absolute top-0 left-0 h-2 bg-slate-300/50 z-0 border-r border-white"
-                                                        style={{ width: `${Math.min((cat.minRequired / cat.limit) * 100, 100)}%` }}
-                                                        title={`Porción Fija: ${formatCurrency(cat.minRequired)}`}
+                                                        className="absolute top-0 bottom-0 w-0.5 bg-black z-10 shadow-[0_0_4px_rgba(0,0,0,0.5)]"
+                                                        style={{ left: `${Math.min(percentage, 100)}%` }}
+                                                        title={`Gastado: ${formatCurrency(cat.spent)}`}
                                                     ></div>
-                                                )}
-                                                <div className={`h-2 rounded-full transition-all duration-500 relative z-10 ${barColor}`} style={{ width: `${Math.min(percentage, 100)}%` }}></div>
+                                                </div>
                                             </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
+
+                                            {/* Expanded Edit Panel */}
+                                            {isExpanded && (
+                                                <div className="px-4 pb-4 bg-slate-50/50 animate-in slide-in-from-top-1">
+
+                                                    {/* Summary Boxes (Clickable) */}
+                                                    <div className="flex gap-4 text-xs mb-3">
+                                                        {/* Recurrente Box */}
+                                                        <div
+                                                            onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'fixed' && detailView?.category === cat.category ? null : { category: cat.category, type: 'fixed' }); }}
+                                                            className={`flex-1 p-2 rounded border cursor-pointer transition-all ${detailView?.type === 'fixed' && detailView?.category === cat.category ? 'ring-2 ring-slate-400 bg-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`}
+                                                        >
+                                                            <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1 flex items-center gap-1">
+                                                                <Lock size={10} /> Recurrente {cat.details?.fixed?.length > 0 && `(${cat.details.fixed.length})`}
+                                                            </label>
+                                                            <div className="font-mono font-bold text-slate-600">{formatCurrency(cat.fixed)}</div>
+                                                        </div>
+
+                                                        {/* Smart Reserve Box */}
+                                                        <div
+                                                            onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'reserved' && detailView?.category === cat.category ? null : { category: cat.category, type: 'reserved' }); }}
+                                                            className={`flex-1 p-2 rounded border cursor-pointer transition-all ${detailView?.type === 'reserved' && detailView?.category === cat.category ? 'ring-2 ring-violet-400 bg-violet-100' : 'bg-violet-50 border-violet-100 hover:bg-violet-100'}`}
+                                                        >
+                                                            <label className="block text-[10px] uppercase text-violet-500 font-bold mb-1 flex items-center gap-1">
+                                                                <Lock size={10} /> Smart Reserve {cat.details?.reserved?.length > 0 && `(${cat.details.reserved.length})`}
+                                                            </label>
+                                                            <div className="font-mono font-bold text-violet-700">{formatCurrency(cat.reserved)}</div>
+                                                            {cat.reservationNotice && <div className="text-[9px] text-violet-500 font-medium mt-1">{cat.reservationNotice}</div>}
+                                                        </div>
+
+                                                        {/* Editable Variable Field (Clickable for details too) */}
+                                                        <div className="flex-1 p-2 bg-white rounded border border-emerald-200 shadow-sm ring-2 ring-emerald-50">
+                                                            <div
+                                                                className="cursor-pointer"
+                                                                onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'variable' && detailView?.category === cat.category ? null : { category: cat.category, type: 'variable' }); }}
+                                                            >
+                                                                <label className="block text-[10px] uppercase text-emerald-600 font-bold mb-1">
+                                                                    Variable Manual {cat.details?.variable?.length > 0 && `(${cat.details.variable.length})`}
+                                                                </label>
+                                                            </div>
+                                                            {isMonthClosed ? (
+                                                                <div className="font-mono font-bold text-slate-400">{formatCurrency(cat.variable)}</div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-1">
+                                                                    <span className="text-slate-400">$</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        className="w-full bg-transparent font-bold text-slate-800 outline-none"
+                                                                        value={cat.variable}
+                                                                        onChange={(e) => handleUpdateVariable(cat.category, parseFloat(e.target.value) || 0)}
+                                                                        onClick={(e) => e.stopPropagation()} // Stop propagation to avoid toggling details when typing
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Detail List View */}
+                                                    {detailView?.category === cat.category && cat.details && (
+                                                        <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-inner animate-in slide-in-from-top-2 mx-1 mb-2">
+                                                            <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">
+                                                                Detalle: {detailView.type === 'fixed' ? 'Gastos Recurrentes' : detailView.type === 'reserved' ? 'Reservas Inteligentes' : 'Presupuesto Variable'}
+                                                            </h5>
+                                                            <div className="space-y-1">
+                                                                {cat.details[detailView.type]?.length === 0 ? (
+                                                                    <p className="text-xs text-slate-400 italic text-center py-2">No hay items en esta sección.</p>
+                                                                ) : (
+                                                                    cat.details[detailView.type]?.map((item: any) => (
+                                                                        <div key={item.id} className="flex justify-between items-center text-xs p-2 hover:bg-slate-50 rounded-lg group transition-colors">
+                                                                            <span className="font-medium text-slate-700">{item.name}</span>
+                                                                            <div className="text-right">
+                                                                                <div className="font-mono font-bold text-slate-800">{formatCurrency(item.amount)}</div>
+                                                                                {item.notice && <div className="text-[10px] text-amber-600 font-medium">{item.notice}</div>}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                         <div className="bg-slate-50 p-3 flex justify-between items-center border-t border-slate-200">
-                            <p className="text-xs text-slate-500">Los presupuestos se reinician mensualmente.</p>
+                            <p className="text-xs text-slate-500">
+                                <span className="inline-block w-2 h-2 rounded-full bg-slate-700 mr-1"></span>Fijo
+                                <span className="inline-block w-2 h-2 rounded-full bg-violet-500 mx-1"></span>Reserva
+                                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mx-1"></span>Variable
+                            </p>
                             <button onClick={onNavigateToSettings} className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
                                 <Settings size={12} /> Gestionar Categorías
                             </button>
@@ -316,3 +380,4 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
         </div>
     );
 };
+
