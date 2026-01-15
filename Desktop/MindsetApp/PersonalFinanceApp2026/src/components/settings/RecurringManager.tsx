@@ -7,9 +7,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { IncomeSource, RecurringExpense, RecurringFrequency, CategoryDef } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
-import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle, Search, Filter, StickyNote, FileText, Table as TableIcon, CreditCard, X, Edit2 } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
-import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel } from '../../utils/subscriptionHelpers';
+import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel, calculateSmartReserveForExpense } from '../../utils/subscriptionHelpers';
 
 export const RecurringManager = () => {
     const { scope } = useScope();
@@ -33,6 +33,11 @@ export const RecurringManager = () => {
         return daysA - daysB;
     });
 
+    // View State
+    const [viewMode, setViewMode] = useState<'CARD' | 'TABLE'>('TABLE');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterCategory, setFilterCategory] = useState<string>('ALL');
+
     const [newIncome, setNewIncome] = useState<Partial<IncomeSource>>({ frequency: 'MONTHLY' });
     const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -42,6 +47,8 @@ export const RecurringManager = () => {
         frequency: 'MONTHLY' as RecurringFrequency,
         startDate: new Date().toISOString().split('T')[0],
         nextDueDate: '',
+        notes: '',
+        reservation: { isEnabled: false, startDate: new Date().toISOString().split('T')[0] }
     });
 
     // --- Validation Logic ---
@@ -124,7 +131,9 @@ export const RecurringManager = () => {
             ...expense,
             nextDueDate: expense.nextDueDate || '',
             startDate: expense.startDate || new Date().toISOString().split('T')[0],
-            endDate: expense.endDate
+            endDate: expense.endDate,
+            notes: expense.notes || '',
+            reservation: expense.reservation || { isEnabled: false, startDate: new Date().toISOString().split('T')[0] }
         });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -137,6 +146,8 @@ export const RecurringManager = () => {
             frequency: 'MONTHLY',
             startDate: new Date().toISOString().split('T')[0],
             nextDueDate: '',
+            notes: '',
+            reservation: { isEnabled: false, startDate: new Date().toISOString().split('T')[0] }
         });
     };
 
@@ -163,25 +174,43 @@ export const RecurringManager = () => {
         const nextDue = new Date(newExpense.nextDueDate);
         const dueDay = nextDue.getDate();
 
+        // Create clean object avoiding undefined values
         const expenseData: any = {
-            ...newExpense,
+            id: editingId || generateId(),
+            name: newExpense.name,
             amount: amount,
-            dueDay: dueDay, // Keep for backward compat
+            category: newExpense.category,
+            active: newExpense.active ?? true,
+            autoPay: newExpense.autoPay ?? false,
             frequency: newExpense.frequency || 'MONTHLY',
             startDate: newExpense.startDate || new Date().toISOString().split('T')[0],
             nextDueDate: newExpense.nextDueDate,
-            scope: scope
+            scope: scope,
+            notes: newExpense.notes || '',
+            dueDay: dueDay // Legacy support
         };
 
         if (newExpense.endDate) {
             expenseData.endDate = newExpense.endDate;
         }
 
+        // Handle reservation safely
+        if (newExpense.reservation) {
+            // Only include reservation if it has meaningful data or is enabled
+            // Sanitize undefineds inside reservation
+            const safeRes = {
+                isEnabled: newExpense.reservation.isEnabled ?? false,
+                startDate: newExpense.reservation.startDate,
+                initialSaved: newExpense.reservation.initialSaved ?? 0 // Default to 0 if undefined
+            };
+            // Only add if explicit
+            expenseData.reservation = safeRes;
+        }
+
         try {
             if (editingId) {
                 await setDoc(doc(db, 'users', user.uid, 'recurringExpenses', editingId), expenseData);
             } else {
-                expenseData.id = generateId();
                 await setDoc(doc(db, 'users', user.uid, 'recurringExpenses', expenseData.id), expenseData);
             }
             cancelEdit();
@@ -359,7 +388,81 @@ export const RecurringManager = () => {
                             />
                         </div>
 
-                        <div className="flex justify-between items-center">
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                                <StickyNote size={12} /> Notas (Opcional)
+                            </label>
+                            <textarea
+                                placeholder="Detalles adicionales, proveedor, usuario/clave..."
+                                className="w-full px-3 py-2 border rounded-lg text-sm h-20 resize-none"
+                                value={newExpense.notes || ''}
+                                onChange={e => setNewExpense({ ...newExpense, notes: e.target.value })}
+                            />
+                        </div>
+
+                        {/* Smart Reserve Config (for non-monthly) */}
+                        {newExpense.frequency !== 'MONTHLY' && (
+                            <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                                <div className="flex justify-between items-center mb-3">
+                                    <label className="text-sm font-bold text-indigo-800 flex items-center gap-2">
+                                        <div className="p-1 bg-white rounded-md shadow-sm">
+                                            <Calendar size={14} className="text-indigo-600" />
+                                        </div>
+                                        Planificar Reserva
+                                    </label>
+                                    <input
+                                        type="checkbox"
+                                        checked={newExpense.reservation?.isEnabled || false}
+                                        onChange={e => setNewExpense({
+                                            ...newExpense,
+                                            reservation: {
+                                                ...newExpense.reservation,
+                                                isEnabled: e.target.checked,
+                                                startDate: newExpense.reservation?.startDate || new Date().toISOString().split('T')[0]
+                                            }
+                                        })}
+                                        className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
+                                    />
+                                </div>
+
+                                {newExpense.reservation?.isEnabled && (
+                                    <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide">Iniciar Reserva</label>
+                                                <input
+                                                    type="date"
+                                                    className="w-full px-2 py-1.5 border border-indigo-200 rounded text-sm bg-white"
+                                                    value={newExpense.reservation.startDate}
+                                                    onChange={e => setNewExpense({
+                                                        ...newExpense,
+                                                        reservation: { ...newExpense.reservation!, startDate: e.target.value }
+                                                    })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide">Ya Ahorrado</label>
+                                                <input
+                                                    type="number"
+                                                    className="w-full px-2 py-1.5 border border-indigo-200 rounded text-sm bg-white"
+                                                    value={newExpense.reservation.initialSaved || 0}
+                                                    onChange={e => setNewExpense({
+                                                        ...newExpense,
+                                                        reservation: { ...newExpense.reservation!, initialSaved: parseFloat(e.target.value) }
+                                                    })}
+                                                />
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] text-indigo-600 leading-relaxed">
+                                            ℹ️ El sistema calculará automáticamente la cuota mensual necesaria para llegar al vencimiento.
+                                            Si te atrasas, la cuota aumentará dinámicamente.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="flex justify-between items-center pt-2">
                             <div className="flex items-center gap-2">
                                 <input
                                     type="checkbox"
@@ -396,76 +499,162 @@ export const RecurringManager = () => {
                         </div>
                     </div>
 
+                    {/* --- FILTERS & VIEW TOGGLE --- */}
+                    <div className="flex flex-col sm:flex-row gap-3 mb-4 animate-in fade-in">
+                        <div className="relative flex-1">
+                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar gastos..."
+                                className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <select
+                                className="px-3 py-2 border rounded-lg text-sm bg-white"
+                                value={filterCategory}
+                                onChange={e => setFilterCategory(e.target.value)}
+                            >
+                                <option value="ALL">Todas las Categorías</option>
+                                {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                            </select>
+                            <div className="bg-slate-100 p-1 rounded-lg flex border border-slate-200">
+                                <button
+                                    onClick={() => setViewMode('TABLE')}
+                                    className={`p-1.5 rounded-md transition-all ${viewMode === 'TABLE' ? 'bg-white shadow text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <TableIcon size={16} />
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('CARD')}
+                                    className={`p-1.5 rounded-md transition-all ${viewMode === 'CARD' ? 'bg-white shadow text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <CreditCard size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="space-y-3">
-                        {sortedExpenses.map(exp => {
-                            const today = new Date().toISOString().split('T')[0];
-                            const daysUntil = daysBetween(today, exp.nextDueDate || '');
-                            const badge = getUrgencyBadge(daysUntil);
-                            const frequencyLabel = getFrequencyLabel(exp.frequency || 'MONTHLY');
+                        {/* --- LIST RENDERING --- */}
+                        {sortedExpenses
+                            .filter(exp => {
+                                const matchesSearch = exp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                    (exp.notes && exp.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+                                const matchesCategory = filterCategory === 'ALL' || exp.category === filterCategory;
+                                return matchesSearch && matchesCategory;
+                            })
+                            .map(exp => {
+                                // Logic for display
+                                const today = new Date().toISOString().split('T')[0];
+                                const daysUntil = daysBetween(today, exp.nextDueDate || '');
+                                const badge = getUrgencyBadge(daysUntil);
+                                const frequencyLabel = getFrequencyLabel(exp.frequency || 'MONTHLY');
+                                const smartReserve = calculateSmartReserveForExpense(exp, new Date());
 
-                            // Calculate reserve suggestion for non-monthly items
-                            let reserveSuggestion = null;
-                            if (exp.frequency !== 'MONTHLY' && (badge.level === 'PRÓXIMO' || badge.level === 'PLANEABLE')) {
-                                const monthsDisp = Math.max(1, Math.floor(daysUntil / 30));
-                                const reserveAmount = exp.amount / monthsDisp;
-                                reserveSuggestion = formatCurrency(reserveAmount) + '/mes';
-                            }
-
-                            return (
-                                <div key={exp.id} className="p-3 border rounded-lg hover:bg-slate-50 transition-colors">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <div className="font-bold text-slate-800">{exp.name}</div>
-                                                {/* Urgency Badge */}
-                                                <div className={`text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-${badge.color}-100 text-${badge.color}-700 border border-${badge.color}-200`}>
-                                                    <span>{badge.icon}</span>
-                                                    <span>{badge.label}</span>
-                                                    {daysUntil >= 0 && <span className="opacity-75">({daysUntil}d)</span>}
+                                if (viewMode === 'TABLE') {
+                                    return (
+                                        <div key={exp.id} className="grid grid-cols-12 gap-2 items-center p-3 border-b border-slate-100 hover:bg-slate-50 text-sm animate-in fade-in">
+                                            <div className="col-span-4 font-medium text-slate-700 truncate flex items-center gap-2">
+                                                {exp.name}
+                                                {exp.notes && (
+                                                    <div className="group relative">
+                                                        <StickyNote size={12} className="text-amber-400 cursor-help" />
+                                                        <div className="absolute left-0 bottom-full mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10">
+                                                            {exp.notes}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="col-span-3 text-slate-500 truncate text-xs">{exp.category}</div>
+                                            <div className="col-span-3">
+                                                <div className={`text-[10px] w-fit px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-${badge.color}-100 text-${badge.color}-700 border border-${badge.color}-200`}>
+                                                    {badge.icon} {daysUntil}d
                                                 </div>
                                             </div>
-                                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
-                                                <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 border border-slate-200">
-                                                    {frequencyLabel}
-                                                </span>
-                                                <span className="flex items-center gap-1">
-                                                    📅 {exp.nextDueDate}
-                                                </span>
-                                                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${exp.active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                                    {exp.active ? '🟢 Activo' : '⚪ Pausado'}
-                                                </span>
+                                            <div className="col-span-2 text-right">
+                                                <div className="font-mono font-bold text-rose-600">{formatCurrency(exp.amount)}</div>
+                                                <div className="flex justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => handleEdit(exp)} className="text-indigo-500"><Edit2 size={12} /></button>
+                                                    <button onClick={() => deleteExpense(exp.id)} className="text-rose-400"><Trash2 size={12} /></button>
+                                                </div>
                                             </div>
-
-                                            {/* Smart Reserve Suggestion */}
-                                            {reserveSuggestion && (
-                                                <div className="text-xs text-indigo-600 font-medium mt-1 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded w-fit">
-                                                    💡 Sugerencia: Reservar {reserveSuggestion}
+                                            {/* Smart Reserve Message in Table Row? Optional, maybe strictly for details */}
+                                            {smartReserve && (
+                                                <div className="col-span-12 mt-1 text-[10px] flex justify-end">
+                                                    <span className={`px-2 py-0.5 rounded ${smartReserve.isActive ? 'bg-indigo-100 text-indigo-700 font-bold' : 'bg-slate-100 text-slate-500'}`}>
+                                                        {smartReserve.message}
+                                                    </span>
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="text-right">
-                                            <div className="font-mono font-bold text-rose-600">{formatCurrency(exp.amount)}</div>
-                                            <div className="text-[10px] text-slate-400 mt-1">{exp.category}</div>
+                                    );
+                                }
+
+                                return (
+                                    <div key={exp.id} className="p-3 border rounded-lg hover:bg-slate-50 transition-colors bg-white shadow-sm">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="font-bold text-slate-800">{exp.name}</div>
+                                                    {/* Urgency Badge */}
+                                                    <div className={`text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1 bg-${badge.color}-100 text-${badge.color}-700 border border-${badge.color}-200`}>
+                                                        <span>{badge.icon}</span>
+                                                        <span>{badge.label}</span>
+                                                        {daysUntil >= 0 && <span className="opacity-75">({daysUntil}d)</span>}
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2 items-center">
+                                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 border border-slate-200">
+                                                        {frequencyLabel}
+                                                    </span>
+                                                    <span className="flex items-center gap-1">
+                                                        📅 {exp.nextDueDate}
+                                                    </span>
+                                                    <span className={`px-1.5 py-0.5 rounded border text-[10px] ${exp.active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                                        {exp.active ? '🟢 Activo' : '⚪ Pausado'}
+                                                    </span>
+                                                </div>
+                                                {/* Notes Indicator */}
+                                                {exp.notes && (
+                                                    <div className="mt-2 text-xs text-slate-500 bg-amber-50 p-1.5 rounded border border-amber-100 flex gap-2 items-start">
+                                                        <StickyNote size={12} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                                                        <span className="italic">"{exp.notes}"</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Smart Reserve Suggestion */}
+                                                {smartReserve && (
+                                                    <div className={`text-xs font-medium mt-2 flex items-center gap-1 px-2 py-1 rounded w-fit ${smartReserve.isActive ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                        {smartReserve.message}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="font-mono font-bold text-rose-600">{formatCurrency(exp.amount)}</div>
+                                                <div className="text-[10px] text-slate-400 mt-1">{exp.category}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
+                                            <button
+                                                onClick={() => handleEdit(exp)}
+                                                className="text-indigo-500 hover:text-indigo-600 text-xs flex items-center gap-1 px-2 py-1 hover:bg-indigo-50 rounded transition-colors"
+                                            >
+                                                ✏️ Editar
+                                            </button>
+                                            <button
+                                                onClick={() => deleteExpense(exp.id)}
+                                                className="text-slate-400 hover:text-rose-500 text-xs flex items-center gap-1 px-2 py-1 hover:bg-rose-50 rounded transition-colors"
+                                            >
+                                                <Trash2 size={12} /> Eliminar
+                                            </button>
                                         </div>
                                     </div>
-
-                                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
-                                        <button
-                                            onClick={() => handleEdit(exp)}
-                                            className="text-indigo-500 hover:text-indigo-600 text-xs flex items-center gap-1 px-2 py-1 hover:bg-indigo-50 rounded transition-colors"
-                                        >
-                                            ✏️ Editar
-                                        </button>
-                                        <button
-                                            onClick={() => deleteExpense(exp.id)}
-                                            className="text-slate-400 hover:text-rose-500 text-xs flex items-center gap-1 px-2 py-1 hover:bg-rose-50 rounded transition-colors"
-                                        >
-                                            <Trash2 size={12} /> Eliminar
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
 
                         {sortedExpenses.length === 0 && (
                             <div className="text-center py-8 text-slate-400 text-sm italic">

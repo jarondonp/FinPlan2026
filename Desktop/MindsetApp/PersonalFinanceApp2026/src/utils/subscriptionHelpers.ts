@@ -165,3 +165,55 @@ export function getFrequencyLabel(frequency: RecurringFrequency): string {
     };
     return labels[frequency];
 }
+
+/**
+ * Calculates smart reserve suggestion based on user configuration
+ */
+export function calculateSmartReserveForExpense(expense: RecurringExpense, today: Date = new Date()): { isActive: boolean; message: string; amount?: number } | null {
+    // 1. Check if reserve is enabled/applicable
+    if (expense.frequency === 'MONTHLY' || !expense.reservation?.isEnabled) {
+        return null;
+    }
+
+    const { targetAmount, startDate, initialSaved } = expense.reservation;
+    const todayStr = today.toISOString().split('T')[0];
+    const target = targetAmount || expense.amount; // Default to full amount if not overridden
+    const start = new Date(startDate);
+
+    // 2. Check "Before Start Date" (Informative Phase)
+    if (today < start) {
+        // Calculate estimated future quota
+        const futureMonths = Math.max(1, Math.floor(daysBetween(startDate, expense.nextDueDate) / 30));
+        const estimatedQuota = (target - (initialSaved || 0)) / futureMonths;
+
+        return {
+            isActive: false,
+            message: `🕒 Inicio programado para ${start.toLocaleString('es-ES', { month: 'long' })} (Est: $${estimatedQuota.toFixed(2)}/mes)`
+        };
+    }
+
+    // 3. "Active Phase" (Action Required)
+    const daysUntilDue = daysBetween(todayStr, expense.nextDueDate);
+
+    // Edge case: Already due or passed
+    if (daysUntilDue <= 0) {
+        return { isActive: true, message: "⚠️ Vence hoy o ya venció", amount: target };
+    }
+
+    // Calculate remaining quota dynamically
+    // "Catch-up" logic: simply divide remaining amount by remaining time
+    const monthsRemaining = Math.max(1, Math.floor(daysUntilDue / 30)); // Minimum 1 month divisor to avoid infinity
+    // In a real app, we would sum actual saved transactions. 
+    // Here we assume "initialSaved" is all we have, so the user must update it if they save.
+    // OR we assume the user follows the plan perfectly. The prompt implies "recalculating if they fail", 
+    // so simply dividing (Total - Saved) / TimeRemaining automatically increases the quota as time shrinks.
+
+    const amountNeeded = target - (initialSaved || 0);
+    const monthlyQuota = amountNeeded / monthsRemaining;
+
+    return {
+        isActive: true,
+        message: `💡 Acción: Reservar $${monthlyQuota.toFixed(2)}/mes`,
+        amount: monthlyQuota
+    };
+}
