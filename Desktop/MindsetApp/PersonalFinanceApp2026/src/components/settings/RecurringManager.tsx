@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
-import { IncomeSource, RecurringExpense, RecurringFrequency } from '../../types';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { db } from '../../firebase/config';
+import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
+import { IncomeSource, RecurringExpense, RecurringFrequency, CategoryDef } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
 import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
@@ -9,17 +13,17 @@ import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel 
 
 export const RecurringManager = () => {
     const { scope } = useScope();
-    const incomes = useLiveQuery(() => db.incomeSources
-        .filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope))
-        .toArray(), [scope]) || [];
+    const { user } = useAuth();
 
-    const expenses = useLiveQuery(() => db.recurringExpenses
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    // Cloud Data Fetching
+    const { data: allIncomes } = useFirestore<IncomeSource>('incomeSources');
+    const incomes = (allIncomes || []).filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope));
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { data: allExpenses } = useFirestore<RecurringExpense>('recurringExpenses');
+    const expenses = (allExpenses || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
+
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
     // Sort expenses by urgency
     const sortedExpenses = [...expenses].sort((a, b) => {
@@ -28,8 +32,6 @@ export const RecurringManager = () => {
         const daysB = daysBetween(today, b.nextDueDate || '');
         return daysA - daysB;
     });
-
-
 
     const [newIncome, setNewIncome] = useState<Partial<IncomeSource>>({ frequency: 'MONTHLY' });
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export const RecurringManager = () => {
 
         // Existing expenses in this category
         const existingExpenses = expenses
-            .filter(e => e.category === categoryName && e.active)
+            .filter(e => e.category === categoryName && e.active && e.id !== editingId)
             .reduce((sum, e) => sum + e.amount, 0);
 
         const newTotal = existingExpenses + amount;
@@ -68,20 +70,52 @@ export const RecurringManager = () => {
 
     // --- Income Handlers ---
     const addIncome = async () => {
-        if (!newIncome.name || !newIncome.amount || !newIncome.payDay1) return;
+        if (!user || !newIncome.name || !newIncome.amount || !newIncome.payDay1) return;
 
-        await db.incomeSources.add({
+        const id = generateId();
+
+        // Sanitize numbers
+        const amount = parseFloat(newIncome.amount.toString()) || 0;
+        const p1 = parseInt(newIncome.payDay1.toString()) || 1;
+
+        let p2: number | undefined = undefined;
+        if (newIncome.frequency === 'BIWEEKLY') {
+            p2 = newIncome.payDay2 ? parseInt(newIncome.payDay2.toString()) : p1 + 15;
+            if (isNaN(p2)) p2 = p1 + 15; // Fallback
+        }
+
+        const incomeData: any = { // Use any to allow dynamic field construction for Firestore
             ...newIncome,
-            id: generateId(),
-            amount: parseFloat(newIncome.amount.toString()),
-            payDay1: parseInt(newIncome.payDay1.toString()),
-            payDay2: newIncome.frequency === 'BIWEEKLY' ? (newIncome.payDay2 ? parseInt(newIncome.payDay2.toString()) : parseInt(newIncome.payDay1.toString()) + 15) : undefined,
+            id,
+            amount,
+            payDay1: p1,
             scope: scope
-        } as IncomeSource);
-        setNewIncome({ frequency: 'MONTHLY' });
+        };
+
+        // Only add payDay2 if it exists
+        if (p2 !== undefined) {
+            incomeData.payDay2 = p2;
+        }
+
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'incomeSources', id), incomeData);
+            setNewIncome({ frequency: 'MONTHLY' });
+        } catch (e) {
+            console.error("Error adding income", e);
+            alert("Error al guardar ingreso: " + (e as Error).message);
+        }
     };
 
-    const deleteIncome = (id: string) => db.incomeSources.delete(id);
+    const deleteIncome = async (id: string) => {
+        if (!user) return;
+        if (window.confirm("¿Eliminar este ingreso?")) {
+            try {
+                await deleteDoc(doc(db, 'users', user.uid, 'incomeSources', id));
+            } catch (e) {
+                console.error("Error deleting income", e);
+            }
+        }
+    }
 
     // --- Expense Handlers ---
     const handleEdit = (expense: RecurringExpense) => {
@@ -92,7 +126,6 @@ export const RecurringManager = () => {
             startDate: expense.startDate || new Date().toISOString().split('T')[0],
             endDate: expense.endDate
         });
-        // Optional: Scroll to top
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -108,14 +141,21 @@ export const RecurringManager = () => {
     };
 
     const saveExpense = async () => {
-        if (!newExpense.name || !newExpense.amount || !newExpense.nextDueDate || !newExpense.category) return;
+        if (!user || !newExpense.name || !newExpense.amount || !newExpense.nextDueDate || !newExpense.category) return;
         const amount = parseFloat(newExpense.amount.toString());
 
         // Validate Budget Update
         if (conflict) {
             const shouldUpdate = confirm(`⚠️ Este gasto excede tu presupuesto de ${newExpense.category} por ${formatCurrency(conflict.diff)}.\n\n¿Deseas aumentar el presupuesto automáticamente a ${formatCurrency(conflict.newTotal)}?`);
             if (shouldUpdate) {
-                await db.categories.update(newExpense.category, { budgetLimit: conflict.newTotal });
+                try {
+                    // Update category limit in Firestore
+                    // Assuming category ID matches name or we search for it.
+                    // In CategoryManager we used name as ID. Let's assume consistent strategy.
+                    await setDoc(doc(db, 'users', user.uid, 'categories', newExpense.category), { budgetLimit: conflict.newTotal }, { merge: true });
+                } catch (e) {
+                    console.error("Error updating category budget", e);
+                }
             }
         }
 
@@ -123,28 +163,44 @@ export const RecurringManager = () => {
         const nextDue = new Date(newExpense.nextDueDate);
         const dueDay = nextDue.getDate();
 
-        const expenseData = {
+        const expenseData: any = {
             ...newExpense,
             amount: amount,
             dueDay: dueDay, // Keep for backward compat
             frequency: newExpense.frequency || 'MONTHLY',
             startDate: newExpense.startDate || new Date().toISOString().split('T')[0],
             nextDueDate: newExpense.nextDueDate,
-            endDate: newExpense.endDate || undefined,
             scope: scope
-        } as RecurringExpense;
+        };
 
-        if (editingId) {
-            await db.recurringExpenses.update(editingId, expenseData);
-        } else {
-            expenseData.id = generateId();
-            await db.recurringExpenses.add(expenseData);
+        if (newExpense.endDate) {
+            expenseData.endDate = newExpense.endDate;
         }
 
-        cancelEdit(); // Reset form
+        try {
+            if (editingId) {
+                await setDoc(doc(db, 'users', user.uid, 'recurringExpenses', editingId), expenseData);
+            } else {
+                expenseData.id = generateId();
+                await setDoc(doc(db, 'users', user.uid, 'recurringExpenses', expenseData.id), expenseData);
+            }
+            cancelEdit();
+        } catch (e) {
+            console.error("Error saving expense", e);
+            alert("Error al guardar gasto recurrente");
+        }
     };
 
-    const deleteExpense = (id: string) => db.recurringExpenses.delete(id);
+    const deleteExpense = async (id: string) => {
+        if (!user) return;
+        if (window.confirm("¿Eliminar este gasto recurrente?")) {
+            try {
+                await deleteDoc(doc(db, 'users', user.uid, 'recurringExpenses', id));
+            } catch (e) {
+                console.error("Error deleting expense", e);
+            }
+        }
+    };
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in">

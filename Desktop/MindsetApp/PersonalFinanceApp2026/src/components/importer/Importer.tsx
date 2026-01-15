@@ -1,24 +1,31 @@
 import React, { useState, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
-import { Transaction } from '../../types';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { db } from '../../firebase/config';
+import { collection, doc, writeBatch, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
+import { Transaction, Account, Rule } from '../../types';
 import { generateId, formatMonth } from '../../utils';
 import { parseCSV } from '../../utils/csvParser';
 import { Upload, CheckCircle, ArrowRight, Loader2, FileText, Settings, AlertCircle, Save } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
 
 import { detectConflicts, Conflict } from '../../utils/reconciliationUtils';
+import { closingService } from '../../services/ClosingService';
 
 type ImportStep = 'UPLOAD' | 'MAP' | 'PREVIEW' | 'RESOLVE';
 
 export const Importer = () => {
     const { scope } = useScope();
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
-    const rules = useLiveQuery(() => db.rules
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    const { user } = useAuth();
+
+    // Firestore Data
+    const { data: allAccounts } = useFirestore<Account>('accounts');
+    const accounts = (allAccounts || []).filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope));
+
+    const { data: allRules } = useFirestore<Rule>('rules');
+    const rules = (allRules || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
     // State
     const [step, setStep] = useState<ImportStep>('UPLOAD');
@@ -75,11 +82,9 @@ export const Importer = () => {
     };
 
     // --- Step 1: Upload / Parse ---
-    // --- Step 1: Upload / Parse ---
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [isSaving, setIsSaving] = useState(false); // New state for saving
 
-    // --- Step 1: Upload / Parse ---
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -103,7 +108,7 @@ export const Importer = () => {
                             date: 0,
                             description: 1,
                             amount: 2,
-                            headerRow: false, // AI usually returns just data, but we can verify. Usually headers are stripped by prompt.
+                            headerRow: false,
                             invertSign: false
                         });
                         setStep('MAP');
@@ -199,7 +204,7 @@ export const Importer = () => {
                 type: (amount > 0 ? 'INCOME' : 'EXPENSE') as import('../../types').TransactionType,
                 category: category,
                 account_id: selectedAccount,
-                scope: scope, // Assign current scope
+                scope: scope,
                 is_duplicate: false,
                 needs_review: !matchedRule
             };
@@ -209,71 +214,73 @@ export const Importer = () => {
         setStep('PREVIEW');
     };
 
-    // --- Step 3: Save ---
     // --- Step 3: Analyze & Save ---
     const handleAnalyze = async () => {
+        if (!user) return alert("Debes iniciar sesión.");
+
         // Filter only selected
         const transactionsToProcess = previewData.filter((_, i) => selectedIndices.has(i));
 
         if (transactionsToProcess.length === 0) return alert("No has seleccionado ninguna transacción para importar.");
 
         // 1. Fetch Existing Data for Duplicate Detection
-        // Sort dates to find range
         const dates = transactionsToProcess.map(t => t.date);
         dates.sort();
         const minDate = dates[0];
         const maxDate = dates[dates.length - 1];
 
-        // Fetch from DB (Buffer +/- 2 days is handled in util, but here we just fetch exact range + buffer to be safe)
-        // Actually, dexie 'between' is exact. Let's fetch a bit wider or just filter in JS if dataset is small.
-        // Optimally:
         const lowerBound = new Date(minDate); lowerBound.setDate(lowerBound.getDate() - 5);
         const upperBound = new Date(maxDate); upperBound.setDate(upperBound.getDate() + 5);
 
-        const existing = await db.transactions
-            .where('date')
-            .between(lowerBound.toISOString().split('T')[0], upperBound.toISOString().split('T')[0], true, true)
-            .filter(t => t.account_id === selectedAccount)
-            .toArray();
+        try {
+            const q = query(
+                collection(db, 'users', user.uid, 'transactions'),
+                where('account_id', '==', selectedAccount),
+                where('date', '>=', lowerBound.toISOString().split('T')[0]),
+                where('date', '<=', upperBound.toISOString().split('T')[0])
+            );
 
-        // 2. Detect
-        const { unique, conflicts } = detectConflicts(transactionsToProcess, existing);
+            const querySnapshot = await getDocs(q);
+            const existing = querySnapshot.docs.map(d => d.data() as Transaction);
 
-        setSafeTransactions(unique);
+            // 2. Detect
+            const { unique, conflicts } = detectConflicts(transactionsToProcess, existing);
 
-        if (conflicts.length > 0) {
-            setConflicts(conflicts);
-            setResolvedConflicts([]); // Reset decisions
-            setStep('RESOLVE');
-        } else {
-            // No conflicts, proceed to save directly
-            await finalSave(unique);
+            setSafeTransactions(unique);
+
+            if (conflicts.length > 0) {
+                setConflicts(conflicts);
+                setResolvedConflicts([]); // Reset decisions
+                setStep('RESOLVE');
+            } else {
+                // No conflicts, proceed to save directly
+                await finalSave(unique);
+            }
+        } catch (e) {
+            console.error("Error detecting conflicts", e);
+            alert("Ocurrió un error al verificar duplicados. Revisa la consola.");
         }
     };
 
     const finalSave = async (transactionsToSave: Transaction[]) => {
+        if (!user) return;
         if (transactionsToSave.length === 0) return alert("No hay transacciones para guardar.");
 
         // Validation: Check for Closed Months
         const uniqueMonths = new Set(transactionsToSave.map(t => t.date.slice(0, 7))); // YYYY-MM
+        const monthStatusMap = new Map<string, string>(); // Optimization cache
 
         try {
-            const statusChecks = Array.from(uniqueMonths).map(async (mKey) => {
+            // We can check closing sequentially since it's just a few months usually
+            for (const mKey of uniqueMonths) {
                 const [y, m] = mKey.split('-').map(Number);
                 const d = new Date(y, m - 1, 1);
-                // Dynamic import to avoid circular dependency issues if any
-                const status = await import('../../services/ClosingService').then(mod => mod.closingService.getStatus(d, scope));
-                return { mKey, status };
-            });
-
-            const results = await Promise.all(statusChecks);
-            const closed = results.find(r => r.status === 'CLOSED' || r.status === 'LOCKED');
-
-            if (closed) {
-                alert(`Error de Integridad:\n\nNo puedes importar transacciones para ${closed.mKey} porque ese mes está CERRADO.\n\nPor favor desmarca esas filas o reabre el mes primero.`);
-                return;
+                const status = await closingService.getStatus(d, scope);
+                if (status === 'CLOSED' || status === 'LOCKED') {
+                    alert(`Error de Integridad:\n\nNo puedes importar transacciones para ${mKey} porque ese mes está CERRADO.\n\nPor favor desmarca esas filas o reabre el mes primero.`);
+                    return;
+                }
             }
-
         } catch (e) {
             console.error(e);
             alert("Error validando estado del mes.");
@@ -283,7 +290,22 @@ export const Importer = () => {
         if (window.confirm(`¿Confirmar importación de ${transactionsToSave.length} transacciones?`)) {
             setIsSaving(true);
             try {
-                await db.transactions.bulkAdd(transactionsToSave);
+                // Batch Writes (Max 500)
+                const chunks = [];
+                const chunkSize = 450;
+                for (let i = 0; i < transactionsToSave.length; i += chunkSize) {
+                    chunks.push(transactionsToSave.slice(i, i + chunkSize));
+                }
+
+                for (const chunk of chunks) {
+                    const batch = writeBatch(db);
+                    chunk.forEach(t => {
+                        const docRef = doc(db, 'users', user.uid, 'transactions', t.id);
+                        batch.set(docRef, t);
+                    });
+                    await batch.commit();
+                }
+
                 alert("¡Importación exitosa!");
                 // Reset
                 setStep('UPLOAD');
@@ -293,6 +315,9 @@ export const Importer = () => {
                 setSelectedIndices(new Set());
                 setConflicts([]);
                 setSafeTransactions([]);
+            } catch (e) {
+                console.error("Error batch saving", e);
+                alert("Error al guardar en la nube.");
             } finally {
                 setIsSaving(false);
             }
@@ -597,7 +622,7 @@ export const Importer = () => {
                                                         </span>
                                                     </td>
                                                     <td className={`px-4 py-3 text-right font-mono font-bold ${isSelected ? (t.amount > 0 ? 'text-emerald-600' : 'text-slate-800') : 'text-slate-400'}`}>
-                                                        {t.amount}
+                                                        {formatCurrency(t.amount)}
                                                     </td>
                                                 </tr>
                                             )
@@ -652,7 +677,7 @@ export const Importer = () => {
                                                     <p className="font-bold text-slate-800">{c.incoming.description_original}</p>
                                                     <p className="text-xs text-slate-500">{c.incoming.date}</p>
                                                 </div>
-                                                <span className="font-mono font-bold text-indigo-700 text-lg">${c.incoming.amount}</span>
+                                                <span className="font-mono font-bold text-indigo-700 text-lg">{formatCurrency(c.incoming.amount)}</span>
                                             </div>
                                         </div>
 
@@ -669,7 +694,7 @@ export const Importer = () => {
                                                     <p className="font-bold text-slate-700">{c.existing.description_original}</p>
                                                     <p className="text-xs text-slate-500">{c.existing.date}</p>
                                                 </div>
-                                                <span className="font-mono font-bold text-slate-600 text-lg">${c.existing.amount}</span>
+                                                <span className="font-mono font-bold text-slate-600 text-lg">{formatCurrency(c.existing.amount)}</span>
                                             </div>
                                         </div>
 
@@ -717,7 +742,6 @@ export const Importer = () => {
 
 const StepBadge = ({ step, current, number, label }: any) => {
     const isActive = current === step;
-    // Rough logic for completed steps would need a proper order check, simplified here
     const isCompleted = (step === 'UPLOAD' && current !== 'UPLOAD') || (step === 'MAP' && current !== 'MAP' && current !== 'UPLOAD') || (step === 'PREVIEW' && current === 'RESOLVE');
 
     return (

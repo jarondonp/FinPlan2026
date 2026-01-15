@@ -1,7 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { ShieldCheck, TrendingDown, Zap, Calendar, TrendingUp, CheckCircle } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
 import { formatCurrency } from '../../utils';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScope } from '../../context/GlobalFilterContext';

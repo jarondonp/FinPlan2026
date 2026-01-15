@@ -1,30 +1,56 @@
 import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
-import { Rule } from '../../types';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { db } from '../../firebase/config';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
+import { Rule, CategoryDef } from '../../types';
 import { generateId } from '../../utils';
 import { BrainCircuit, X, Plus } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
 
 export const RuleManager = () => {
     const { scope } = useScope();
-    const rules = useLiveQuery(() => db.rules
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    const { user } = useAuth();
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    // Fetch Rules from Firestore
+    const { data: allRules } = useFirestore<Rule>('rules');
+    const rules = (allRules || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
+
+    // Fetch Categories from Firestore
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
+
     const [newRule, setNewRule] = useState<Partial<Rule>>({ matchType: "contains", active: true });
 
     const addRule = async () => {
+        if (!user) return alert("Debes iniciar sesión");
         if (!newRule.pattern || !newRule.category) return;
-        await db.rules.add({ ...newRule, id: generateId(), scope: scope } as Rule);
-        setNewRule({ matchType: "contains", active: true, category: categories[0]?.name, pattern: "" });
+
+        try {
+            const ruleId = generateId();
+            const ruleData = { ...newRule, id: ruleId, scope: scope } as Rule;
+            const docRef = doc(db, 'users', user.uid, 'rules', ruleId);
+            await setDoc(docRef, ruleData);
+
+            // Reset
+            setNewRule({ matchType: "contains", active: true, category: categories[0]?.name, pattern: "" });
+        } catch (e) {
+            console.error(e);
+            alert("Error al guardar regla");
+        }
     };
 
-    const deleteRule = (id: string) => {
-        db.rules.delete(id);
+    const deleteRule = async (id: string) => {
+        if (!user) return;
+        if (!confirm("¿Eliminar regla?")) return;
+        try {
+            await deleteDoc(doc(db, 'users', user.uid, 'rules', id));
+        } catch (e) {
+            console.error(e);
+            alert("Error al eliminar");
+        }
     };
 
     return (
@@ -55,7 +81,11 @@ export const RuleManager = () => {
                         {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                 </div>
-                <button onClick={addRule} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold h-[38px]">
+                <button
+                    onClick={addRule}
+                    disabled={!user || !newRule.pattern}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold h-[38px] disabled:opacity-50"
+                >
                     <Plus size={18} />
                 </button>
             </div>

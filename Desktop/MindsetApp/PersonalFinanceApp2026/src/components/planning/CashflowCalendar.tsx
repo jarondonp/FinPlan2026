@@ -1,28 +1,26 @@
 import React, { useMemo, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
 import { calculateDailyBalances, DailyBalance } from '../../utils/cashflowLogic';
 import { formatCurrency } from '../../utils';
 import { ChevronLeft, ChevronRight, AlertCircle, TrendingUp, Calendar as CalIcon, Flame, CreditCard } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
+import { useFirestore } from '../../hooks/useFirestore';
+import { IncomeSource, RecurringExpense, CategoryDef } from '../../types';
 
 export const CashflowCalendar = () => {
     const { scope } = useScope();
     // Use useAccountBalance hook to get accounts with dynamicBalance
     const accounts = useAccountBalance(scope);
 
-    const incomes = useLiveQuery(() => db.incomeSources
-        .filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope))
-        .toArray(), [scope]) || [];
+    // Cloud Data
+    const { data: allIncomes } = useFirestore<IncomeSource>('incomeSources');
+    const incomes = (allIncomes || []).filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope));
 
-    const expenses = useLiveQuery(() => db.recurringExpenses
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    const { data: allExpenses } = useFirestore<RecurringExpense>('recurringExpenses');
+    const expenses = (allExpenses || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
     // Calculate Initial Liquid Balance (Checking + Savings usually, but let's stick to Checking for 'Spendable')
     const initialBalance = useMemo(() => {

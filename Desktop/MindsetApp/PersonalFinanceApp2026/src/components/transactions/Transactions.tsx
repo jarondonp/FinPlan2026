@@ -1,39 +1,45 @@
 import React, { useState, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+import { db } from '../../firebase/config';
+import { doc, setDoc, deleteDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
 import { aiService } from '../../services/aiService';
 import { formatCurrency } from '../../utils';
 import { Search, Sparkles, Trash2, Loader2, Save } from 'lucide-react';
 import { closingService } from '../../services/ClosingService';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { MonthStatusBadge } from '../closing/MonthStatusBadge';
+import { CategoryDef, Transaction, Account } from '../../types';
 
 export const Transactions = () => {
     const { filterState } = useGlobalFilter();
     const { scope, selectedAccountIds, timeframe } = filterState;
+    const { user } = useAuth();
 
     // Status State
     const [isLocked, setIsLocked] = useState(false);
 
     // Check Lock Status
     React.useEffect(() => {
-        closingService.getStatus(timeframe.start, scope).then(status => {
-            setIsLocked(status === 'LOCKED' || status === 'CLOSED');
-        });
+        // closingService needs to be refactored too, but assuming it returns a promise
+        // We'll fix closingService next.
+        if (timeframe.start) {
+            const startDetails = new Date(timeframe.start);
+            closingService.getStatus(startDetails, scope).then(status => {
+                setIsLocked(status === 'LOCKED' || status === 'CLOSED');
+            });
+        }
     }, [timeframe, scope]);
 
-    // Queries
-    const transactions = useLiveQuery(() => db.transactions
-        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
-        .toArray(), [scope]) || [];
+    // Queries (Cloud)
+    const { data: allTransactions } = useFirestore<Transaction>('transactions');
+    const transactions = (allTransactions || []).filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope));
 
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    const { data: allAccounts } = useFirestore<Account>('accounts');
+    const accounts = (allAccounts || []).filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope));
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
     // Filters
     const [search, setSearch] = useState("");
@@ -47,15 +53,24 @@ export const Transactions = () => {
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
             // 1. Search Filter
-            const matchesSearch = t.description_original.toLowerCase().includes(search.toLowerCase()) ||
-                t.description_normalized.toLowerCase().includes(search.toLowerCase());
+            const matchesSearch = (t.description_original || "").toLowerCase().includes(search.toLowerCase()) ||
+                (t.description_normalized || "").toLowerCase().includes(search.toLowerCase());
 
             // 2. Category Filter
             const matchesCategory = filterCategory === "ALL" || t.category === filterCategory;
 
             // 3. Timeframe Filter
-            const tDate = new Date(t.date);
-            const matchesTimeframe = tDate >= timeframe.start && tDate <= timeframe.end;
+            // String comparison usually works for ISO dates YYYY-MM-DD
+            // But let's be safe if timeframe objects are Dates or Strings
+            const tDateStr = t.date;
+            // timeframe.start/end might be strings from global filter context
+            const startStr = timeframe.start instanceof Date ? timeframe.start.toISOString().split('T')[0] : timeframe.start;
+            const endStr = timeframe.end instanceof Date ? timeframe.end.toISOString().split('T')[0] : timeframe.end;
+
+            let matchesTimeframe = true;
+            if (startStr && endStr) {
+                matchesTimeframe = tDateStr >= startStr && tDateStr <= endStr;
+            }
 
             // 4. Account Filter
             const matchesAccount = selectedAccountIds.length === 0 || selectedAccountIds.includes(t.account_id);
@@ -66,19 +81,30 @@ export const Transactions = () => {
 
 
     // Handlers
-    const handleDelete = (id: string) => {
+    const handleDelete = async (id: string) => {
+        if (!user) return;
         if (isLocked) return alert("Acción denegada: El mes está cerrado.");
         if (confirm("¿Eliminar transacción?")) {
-            db.transactions.delete(id);
+            try {
+                await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+            } catch (e) {
+                console.error("Error deleting transaction", e);
+            }
         }
     }
 
-    const handleCategoryChange = (id: string, newCategory: string) => {
+    const handleCategoryChange = async (id: string, newCategory: string) => {
+        if (!user) return;
         if (isLocked) return alert("El mes está cerrado. No se pueden editar categorías.");
-        db.transactions.update(id, { category: newCategory, needs_review: false });
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'transactions', id), { category: newCategory, needs_review: false }, { merge: true });
+        } catch (e) {
+            console.error("Error updating category", e);
+        }
     };
 
     const handleAutoCategorize = async () => {
+        if (!user) return;
         const uncategorized = transactions.filter(t => t.category === 'Uncategorized' || t.category === 'Unknown');
         if (uncategorized.length === 0) return alert("No hay transacciones sin categorizar.");
 
@@ -92,12 +118,15 @@ export const Transactions = () => {
             // Call AI
             const results = await aiService.categorizeTransactions(inputs, catNames);
 
-            // Build updates
-            await db.transaction('rw', db.transactions, async () => {
-                for (const res of results) {
-                    await db.transactions.update(res.id, { category: res.category, needs_review: false });
-                }
+            // Build updates using Batch
+            const batch = writeBatch(db);
+            results.forEach(res => {
+                const docRef = doc(db, 'users', user.uid, 'transactions', res.id);
+                batch.update(docRef, { category: res.category, needs_review: false });
             });
+
+            await batch.commit();
+
             alert(`Categorización completada. ${results.length} transacciones actualizadas.`);
 
         } catch (e) {

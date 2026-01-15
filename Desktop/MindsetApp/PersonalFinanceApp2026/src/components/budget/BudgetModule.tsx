@@ -1,7 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { db } from '../../firebase/config';
+import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
 import { formatCurrency, getRandomColor, generateId } from '../../utils';
 import { Goal, CategoryDef } from '../../types';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
@@ -14,23 +18,20 @@ interface BudgetModuleProps {
 export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     const { filterState } = useGlobalFilter();
     const { scope, timeframe } = filterState;
+    const { user } = useAuth();
 
-    // Data Fetching
-    const transactions = useLiveQuery(() => db.transactions
-        .filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope))
-        .toArray(), [scope]) || [];
+    // Cloud Data Fetching
+    const { data: allTransactions } = useFirestore<any>('transactions');
+    const transactions = (allTransactions || []).filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope));
 
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
-    const goals = useLiveQuery(() => db.goals
-        .filter(g => g.scope === scope || (scope === 'PERSONAL' && !g.scope))
-        .toArray(), [scope]) || [];
+    const { data: allGoals } = useFirestore<Goal>('goals');
+    const goals = (allGoals || []).filter(g => g.scope === scope || (scope === 'PERSONAL' && !g.scope));
 
-    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    const { data: allRecurring } = useFirestore<any>('recurringExpenses');
+    const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
     // State
     const [isAddingGoal, setIsAddingGoal] = useState(false);
@@ -40,10 +41,6 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
 
     // Check Status
     React.useEffect(() => {
-        // We use the start of the current month based on real time, 
-        // OR should we use the timeframe.start? 
-        // The budget component calculates based on: new Date().toISOString().slice(0, 7)
-        // so we must lock based on THAT same period.
         const currentBudgetMonth = new Date(); // Today
         closingService.getStatus(currentBudgetMonth, scope).then(status => {
             setIsMonthClosed(status === 'CLOSED' || status === 'LOCKED');
@@ -51,11 +48,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     }, [scope]);
 
     // Budget Calculations
-    // FIX: Respect Global Timeframe instead of hardcoded current month
     const currentDateRange = useMemo(() => {
-        // If timeframe is set (e.g. "Previous Month" or Custom), use it.
-        // If generic "Current Month", use today.
-        // Assuming timeframe.start and end are YYYY-MM-DD strings.
         const start = timeframe.start ? new Date(timeframe.start) : new Date();
         const monthStr = start.toISOString().slice(0, 7); // YYYY-MM
         return {
@@ -103,30 +96,55 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             .sort((a, b) => (b.limit > 0 ? b.spent / b.limit : 0) - (a.limit > 0 ? a.spent / a.limit : 0));
     }, [categories, transactions, currentDateRange, recurringExpenses]);
 
-    const handleUpdateLimit = (catName: string, newLimit: number) => {
-        db.categories.update(catName, { budgetLimit: newLimit });
+    const handleUpdateLimit = async (catName: string, newLimit: number) => {
+        if (!user) return;
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'categories', catName), { budgetLimit: newLimit }, { merge: true });
+        } catch (e) {
+            console.error("Error updating limit", e);
+        }
     };
 
-    const handleToggleVisibility = (catName: string, currentHidden?: boolean) => {
-        db.categories.update(catName, { isHidden: !currentHidden });
+    const handleToggleVisibility = async (catName: string, currentHidden?: boolean) => {
+        if (!user) return;
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'categories', catName), { isHidden: !currentHidden }, { merge: true });
+        } catch (e) {
+            console.error("Error toggling visibility", e);
+        }
     };
 
     const handleAddGoal = async () => {
-        if (!newGoal.name || !newGoal.targetAmount) return;
-        await db.goals.add({
+        if (!user || !newGoal.name || !newGoal.targetAmount) return;
+
+        const id = generateId();
+        const goalData: Goal = {
             ...newGoal,
-            id: generateId(),
+            id,
             currentAmount: newGoal.currentAmount || 0,
             color: getRandomColor(),
-            icon: 'Target'
-        } as Goal);
-        setIsAddingGoal(false);
-        setNewGoal({});
+            icon: 'Target',
+            scope: scope
+        } as Goal;
+
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'goals', id), goalData);
+            setIsAddingGoal(false);
+            setNewGoal({});
+        } catch (e) {
+            console.error("Error adding goal", e);
+            alert("Error al crear meta");
+        }
     };
 
-    const handleDeleteGoal = (id: string) => {
+    const handleDeleteGoal = async (id: string) => {
+        if (!user) return;
         if (confirm("¿Eliminar esta meta?")) {
-            db.goals.delete(id);
+            try {
+                await deleteDoc(doc(db, 'users', user.uid, 'goals', id));
+            } catch (e) {
+                console.error("Error deleting goal", e);
+            }
         }
     };
 
@@ -145,7 +163,6 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* --- Goals Section --- */}
                 <div className="space-y-6">
-                    {/* ... (Goals UI omitted for brevity, keeping existing structure via replace not possible in full write, so reproducing minimal) */}
                     <div className="flex justify-between items-center">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                             <Target size={18} className="text-indigo-600" /> Metas de Ahorro

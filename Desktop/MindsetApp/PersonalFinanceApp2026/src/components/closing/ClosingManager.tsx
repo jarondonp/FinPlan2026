@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
 import { closingService } from '../../services/ClosingService';
 import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { formatMonth } from '../../utils';

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
+// import { db } from '../../db/db'; // Removed
+import { useFirestore } from '../../hooks/useFirestore'; // Added
 import { closingService } from '../../services/ClosingService';
 import { budgetService } from '../../services/BudgetService';
 import { Account, Scope } from '../../types';
@@ -18,10 +19,9 @@ export const ClosingWizard = ({ monthDate, scope, onClose, onSuccess }: ClosingW
     const [step, setStep] = useState<'VERIFY_ACCOUNTS' | 'VERIFY_BUDGET' | 'SUMMARY'>('VERIFY_ACCOUNTS');
     const [loading, setLoading] = useState(false);
 
-    // Fetch Accounts
-    const accounts = useLiveQuery(() => db.accounts
-        .filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope))
-        .toArray(), [scope]) || [];
+    // Fetch Accounts from Firestore
+    const { data: allAccounts } = useFirestore<Account>('accounts');
+    const accounts = (allAccounts || []).filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope));
 
     // Local State for verification
     // Map accountId -> { calculated: number, real: number | null, status: 'PENDING' | 'MATCH' | 'MISMATCH' }
@@ -49,6 +49,7 @@ export const ClosingWizard = ({ monthDate, scope, onClose, onSuccess }: ClosingW
             const savedDrafts = JSON.parse(localStorage.getItem(storageKey) || '{}');
 
             for (const acc of accounts) {
+                // Now uses Firestore-backed service
                 const bal = await closingService.getAccountBalance(acc.id, lastDay);
 
                 // Check if we have a saved verification for this account
@@ -73,10 +74,11 @@ export const ClosingWizard = ({ monthDate, scope, onClose, onSuccess }: ClosingW
             }
             setVerificationMap(map);
 
-            // Fetch Budget Health
+            // Fetch Budget Health (now Firestore-backed)
             const health = await budgetService.getBudgetHealth(monthDate, scope);
             setBudgetHealth(health);
         };
+        // Only run if accounts are loaded
         if (accounts.length > 0) init();
     }, [accounts, monthDate, scope]);
 

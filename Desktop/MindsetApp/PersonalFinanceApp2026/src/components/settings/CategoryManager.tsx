@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db/db';
+import { db } from '../../firebase/config';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useFirestore } from '../../hooks/useFirestore';
 import { CategoryDef } from '../../types';
 import { getRandomColor, formatCurrency } from '../../utils';
 import { Tag, Plus, X, Edit2 } from 'lucide-react';
@@ -8,44 +10,88 @@ import { useScope } from '../../context/GlobalFilterContext';
 
 export const CategoryManager = () => {
     const { scope } = useScope();
-    const categories = useLiveQuery(() => db.categories
-        .filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope))
-        .toArray(), [scope]) || [];
+    const { user } = useAuth(); // Auth context
+
+    // Cloud Data
+    const { data: allCategories } = useFirestore<CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
+
     const [newCategoryName, setNewCategoryName] = useState("");
     const [editingCategory, setEditingCategory] = useState<CategoryDef | null>(null);
 
     const addCategory = async () => {
-        if (!newCategoryName || categories.find((c) => c.name === newCategoryName)) return;
+        if (!user || !newCategoryName) return;
+
+        if (categories.find((c) => c.name.toLowerCase() === newCategoryName.trim().toLowerCase())) {
+            alert("La categoría ya existe");
+            return;
+        }
+
+        // Use name as ID for categories (simple & unique per user scope ideally, but globally unique in collection per user)
+        // We will store in users/{uid}/categories/{name} to ensure uniqueness/easy access or use generated ID.
+        // The previous code used 'name' as key for deletes. Let's stick to using 'name' as ID if safe, or generate ID.
+        // Ideally URL-safe name. Let's use simple name but handle spaces?
+        // Better: use random ID, store name as field.
+        // BUT wait, existing logic uses 'name' as identifier?
+        // Dexie schema: categories: 'name, scope, ...' -> name is primary key?
+        // Let's assume unique names.
+
+        const catId = newCategoryName.trim(); // ID based on name for now
+
         const newCat: CategoryDef = { name: newCategoryName, color: getRandomColor(), scope: scope };
-        await db.categories.add(newCat);
-        setNewCategoryName("");
+
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'categories', catId), newCat);
+            setNewCategoryName("");
+        } catch (e) {
+            console.error("Error adding category", e);
+            alert("Error al guardar categoría");
+        }
     };
 
     const deleteCategory = async (name: string) => {
+        if (!user) return;
         if (window.confirm("¿Seguro que deseas eliminar esta categoría? Se desvinculará de las transacciones.")) {
-            await db.categories.delete(name);
+            try {
+                // Assuming ID matches name as per addCategory logic
+                await deleteDoc(doc(db, 'users', user.uid, 'categories', name));
+            } catch (e) {
+                console.error("Error deleting category", e);
+                alert("Error al eliminar");
+            }
         }
     };
 
     const loadDefaults = async () => {
+        if (!user) return;
         const defaults = scope === 'BUSINESS'
             ? ["Ventas", "Servicios", "Nómina", "Alquiler", "Marketing", "Software", "Impuestos", "Otros Gastos"]
             : ["Salario", "Vivienda", "Comida", "Transporte", "Servicios", "Entretenimiento", "Salud", "Ahorro"];
 
-        await db.transaction('rw', db.categories, async () => {
-            for (const name of defaults) {
-                if (!await db.categories.get(name)) {
-                    await db.categories.add({ name, color: getRandomColor(), scope });
-                }
-            }
-        });
+        try {
+            await Promise.all(defaults.map(name => {
+                const newCat: CategoryDef = { name, color: getRandomColor(), scope };
+                return setDoc(doc(db, 'users', user.uid, 'categories', name), newCat);
+            }));
+            // alert("Categorías por defecto cargadas en la nube.");
+        } catch (e) {
+            console.error("Error loading defaults", e);
+            alert("Error al cargar defaults");
+        }
     };
 
     const updateCategoryLimit = async (name: string, limit: number) => {
-        await db.categories.update(name, { budgetLimit: limit });
-        setEditingCategory(null);
+        if (!user) return;
+        const safeLimit = isNaN(limit) ? 0 : limit;
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'categories', name), { budgetLimit: safeLimit }, { merge: true });
+            setEditingCategory(null);
+        } catch (e) {
+            console.error("Error updating limit", e);
+        }
     }
 
+    // Render logic remains similar...
     return (
         <div className="space-y-6 w-full lg:col-span-2">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm animate-in fade-in">

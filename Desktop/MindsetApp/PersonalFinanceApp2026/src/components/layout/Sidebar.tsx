@@ -15,15 +15,12 @@ import {
     Building2,
     User
 } from "lucide-react";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "../../db/db";
 import { formatCurrency } from "../../utils";
 import { useScope } from '../../context/GlobalFilterContext';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
+import { useFirestore } from '../../hooks/useFirestore';
 import { daysBetween } from '../../utils/subscriptionHelpers';
 import { RecurringExpense } from '../../types';
-// import { DEMO_ACCOUNTS, DEMO_TRANSACTIONS, DEMO_GOALS, DEFAULT_CATEGORIES } from "../../utils";
-// I'll handle demo data loading inside the component for now or move it to utils.
 
 interface SidebarProps {
     currentView: string;
@@ -40,10 +37,9 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
         return acc + (isLiability ? -(curr.dynamicBalance || 0) : (curr.dynamicBalance || 0));
     }, 0);
 
-    // --- Subscription Metrics ---
-    const recurringExpenses = useLiveQuery(() => db.recurringExpenses
-        .filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope))
-        .toArray(), [scope]) || [];
+    // --- Subscription Metrics (Cloud) ---
+    const { data: allRecurring } = useFirestore<RecurringExpense>('recurringExpenses');
+    const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
     const { urgentCount, reserveRequired } = React.useMemo(() => {
         let count = 0;
@@ -67,14 +63,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
     }, [recurringExpenses]);
 
     const loadDemoData = async () => {
-        if (window.confirm("Esto reemplazará tus datos actuales con datos de demostración. ¿Continuar?")) {
-            await db.resetDatabase();
-            // We need to re-insert demo data. 
-            // I will define the demo data in a separate file to keep this clean, but for now I'll just omit or add a placeholder.
-            // Actually, the user asked to maintain functionalities, so I should implement the demo loader.
-            // I will implement a helper in utils for this.
-            alert("Datos de demostración cargados (Simulacion - Implementar logica real en utils)");
-        }
+        alert("La carga de datos de demostración está deshabilitada durante la migración a la nube.");
     };
 
     return (

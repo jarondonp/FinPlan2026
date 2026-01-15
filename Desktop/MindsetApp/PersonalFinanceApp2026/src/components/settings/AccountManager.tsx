@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-// import { useLiveQuery } from 'dexie-react-hooks'; // Removed
-// import { db } from '../../db/db'; // Removed
 import { db } from '../../firebase/config'; // Firestore instance
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
