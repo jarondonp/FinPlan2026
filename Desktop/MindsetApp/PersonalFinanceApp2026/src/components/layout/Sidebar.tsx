@@ -28,7 +28,7 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
-    const { scope, selectedDate } = useScope();
+    const { scope } = useScope();
     const accounts = useAccountBalance(scope);
 
     const totalBalance = accounts.reduce((acc, curr) => {
@@ -43,7 +43,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
 
     const { urgentCount, reserveRequired, urgentItems } = React.useMemo(() => {
         // Use CENTRALIZED logic to guarantee consistency with Dashboard
-        const result = calculateSmartReserve(recurringExpenses, selectedDate);
+        const result = calculateSmartReserve(recurringExpenses);
 
         // Urgent Count = Overdue + Urgent (Same as dashboard red items)
         const criticalItems = [...result.vencidos, ...result.urgentes];
@@ -56,7 +56,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
             reserveRequired: result.reservaTotal,
             urgentItems: criticalItems.sort((a, b) => new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime())
         };
-    }, [recurringExpenses, selectedDate]);
+    }, [recurringExpenses]);
 
 
     const loadDemoData = async () => {

@@ -122,7 +122,10 @@ export function calculateSmartReserve(
         reservaTotal: 0
     };
 
-    const todayStr = today.toISOString().split('T')[0];
+    // Robust Local Date Parsing
+    const currentYear = today.getFullYear();
+    const currentMonthIndex = today.getMonth();
+    const todayStr = `${currentYear}-${String(currentMonthIndex + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     expenses
         .filter(exp => exp.active) // Check ALL active expenses for urgency, not just annuals
@@ -166,7 +169,9 @@ export function calculateSmartReserve(
             // If we have a valid start date logic
             if (startYear > 0) {
                 const startMonthTotal = startYear * 12 + startMonthIndex;
-                const currentMonthTotal = today.getFullYear() * 12 + today.getMonth();
+
+                // Compare in local time (derived from the passed 'today' object)
+                const currentMonthTotal = currentYear * 12 + currentMonthIndex;
 
                 if (startMonthTotal > currentMonthTotal) {
                     results.pendientes.push({ exp, startDate: reservationConfig!.startDate! });
@@ -216,6 +221,24 @@ export function getFrequencyLabel(frequency: RecurringFrequency): string {
 }
 
 /**
+ * Parsea un string YYYY-MM-DD y devuelve un objeto Date en hora local (00:00:00)
+ * Evita el bache de zona horaria de 'new Date(str)'
+ */
+export function parseLocalISOString(dateStr: string): Date {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return new Date(dateStr);
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+}
+
+/**
+ * Formatea un string YYYY-MM-DD a una fecha local amigable sin errores de zona horaria
+ */
+export function formatSafeDate(dateStr: string, options: Intl.DateTimeFormatOptions = { month: 'long' }): string {
+    const date = parseLocalISOString(dateStr);
+    return date.toLocaleDateString('es-ES', options);
+}
+
+/**
  * Calculates smart reserve suggestion based on user configuration
  */
 export function calculateSmartReserveForExpense(expense: RecurringExpense, today: Date = new Date()): { isActive: boolean; message: string; amount?: number } | null {
@@ -225,9 +248,9 @@ export function calculateSmartReserveForExpense(expense: RecurringExpense, today
     }
 
     const { targetAmount, startDate, initialSaved } = expense.reservation;
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
     const target = targetAmount || expense.amount; // Default to full amount if not overridden
-    const start = new Date(startDate);
+    const start = parseLocalISOString(startDate);
 
     // 2. Check "Before Start Date" (Informative Phase)
     if (today < start) {
@@ -237,7 +260,7 @@ export function calculateSmartReserveForExpense(expense: RecurringExpense, today
 
         return {
             isActive: false,
-            message: `🕒 Inicio programado para ${start.toLocaleString('es-ES', { month: 'long' })} (Est: $${estimatedQuota.toFixed(2)}/mes)`
+            message: `🕒 Inicio programado para ${formatSafeDate(startDate)} (Est: $${estimatedQuota.toFixed(2)}/mes)`
         };
     }
 

@@ -13,7 +13,7 @@ import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, Ale
 import { MonthStatusBadge } from '../closing/MonthStatusBadge';
 import { AiInsightWidget } from './AiInsightWidget';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
-import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel, calculateNextDueDate } from '../../utils/subscriptionHelpers';
+import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel, calculateNextDueDate, formatSafeDate } from '../../utils/subscriptionHelpers';
 import { RecurringExpense } from '../../types';
 
 interface DashboardProps {
@@ -30,6 +30,8 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         setComparisonMode
     } = useGlobalFilter();
     const { timeframe, selectedAccountIds } = filterState;
+    const selectedDate = timeframe.start; // Directly mapped from filter state
+
 
     // Data Fetching (Cloud)
     // We fetch all and filter in memory for now (simpler migration)
@@ -139,7 +141,8 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     // --- Subscription Alerts Logic ---
     const subscriptionAlerts = useMemo(() => {
         // Use the CENTRALIZED smart calculation
-        const result = calculateSmartReserve(recurringExpenses);
+        const result = calculateSmartReserve(recurringExpenses, selectedDate);
+
 
         // Map 'critical' (Overdue + Urgent)
         const critical = [...result.vencidos, ...result.urgentes].map(exp => ({
@@ -156,7 +159,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
             const saved = exp.reservation?.initialSaved || 0;
             const reserve = (target - saved) / monthsDisp;
 
-            return { exp, days, reserve, status: 'ACTIVE' };
+            return { exp, days, reserve, status: 'ACTIVE', startDate: undefined };
         });
 
         const pendingReserves = result.pendientes.map(item => {
@@ -176,7 +179,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         });
 
         return { critical, upcomingNonMonthly: allUpcoming };
-    }, [recurringExpenses]);
+    }, [recurringExpenses, selectedDate]);
 
     // --- Mark as Paid Logic ---
     const [processingId, setProcessingId] = useState<string | null>(null);
@@ -258,7 +261,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                                         <div key={item.exp.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors group">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg shadow-sm border border-slate-200">
-                                                    {item.exp.icon || '📄'}
+                                                    📄
                                                 </div>
                                                 <div>
                                                     <div className="font-bold text-slate-800">{item.exp.name}</div>
@@ -524,7 +527,15 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                                     <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                                         <Briefcase size={20} />
                                     </div>
-                                    <span className="font-bold text-slate-800">Próximos Gastos Anuales</span>
+                                    <div>
+                                        <div className="font-bold text-slate-800">Próximos Gastos Anuales</div>
+                                        {/* Totalizer Addition */}
+                                        {subscriptionAlerts.upcomingNonMonthly.reduce((sum, item) => sum + (item.status === 'ACTIVE' ? item.reserve : 0), 0) > 0 && (
+                                            <div className="text-xs text-indigo-600 font-medium">
+                                                Reserva Mensual Total: <span className="font-bold">{formatCurrency(subscriptionAlerts.upcomingNonMonthly.reduce((sum, item) => sum + (item.status === 'ACTIVE' ? item.reserve : 0), 0))}</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                 <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-full text-slate-500 font-bold border border-slate-200">
                                     Reserva Sugerida
@@ -564,7 +575,7 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                                                         <div className="flex flex-col items-end">
                                                             <div className="text-[10px] font-bold text-slate-500 mb-0.5">Inicia en</div>
                                                             <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded">
-                                                                {item.startDate ? new Date(item.startDate).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }).replace('.', '').toUpperCase() : 'N/A'}
+                                                                {item.startDate ? formatSafeDate(item.startDate, { month: 'short', year: 'numeric' }).replace('.', '').toUpperCase() : 'N/A'}
                                                             </div>
                                                         </div>
                                                     </>

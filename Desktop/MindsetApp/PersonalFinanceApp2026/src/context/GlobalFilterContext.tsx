@@ -15,7 +15,10 @@ interface GlobalFilterContextType {
 interface ScopeContextType {
     scope: Scope;
     setScope: (scope: Scope) => void;
+    selectedDate: Date; // Added for compatibility
 }
+// ...
+
 
 const GlobalFilterContext = createContext<GlobalFilterContextType | undefined>(undefined);
 
@@ -147,6 +150,8 @@ export const useScope = (): ScopeContextType => {
     const { filterState, setScope } = useGlobalFilter();
     return {
         scope: filterState.scope,
-        setScope
+        setScope,
+        selectedDate: filterState.timeframe.start // Expose the start date as "selectedDate"
     };
 };
+
