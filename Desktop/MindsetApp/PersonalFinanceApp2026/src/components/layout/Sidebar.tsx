@@ -19,7 +19,7 @@ import { formatCurrency } from "../../utils";
 import { useScope } from '../../context/GlobalFilterContext';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
 import { useFirestore } from '../../hooks/useFirestore';
-import { daysBetween } from '../../utils/subscriptionHelpers';
+import { daysBetween, calculateSmartReserve } from '../../utils/subscriptionHelpers';
 import { RecurringExpense } from '../../types';
 
 interface SidebarProps {
@@ -28,7 +28,7 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
-    const { scope } = useScope();
+    const { scope, selectedDate } = useScope();
     const accounts = useAccountBalance(scope);
 
     const totalBalance = accounts.reduce((acc, curr) => {
@@ -42,33 +42,22 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
     const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
     const { urgentCount, reserveRequired, urgentItems } = React.useMemo(() => {
-        let count = 0;
-        let reserve = 0;
-        const items: RecurringExpense[] = [];
-        const today = new Date().toISOString().split('T')[0];
+        // Use CENTRALIZED logic to guarantee consistency with Dashboard
+        const result = calculateSmartReserve(recurringExpenses, selectedDate);
 
-        recurringExpenses.forEach(exp => {
-            if (!exp.active) return;
-            const days = daysBetween(today, exp.nextDueDate || '');
+        // Urgent Count = Overdue + Urgent (Same as dashboard red items)
+        const criticalItems = [...result.vencidos, ...result.urgentes];
 
-            // Urgency Badge Counter (Overdue or < 30 days)
-            if (days < 30) {
-                count++;
-                items.push(exp);
-            }
+        // Reserve Required = ONLY active reserves (excluding future/pending ones)
+        // calculateSmartReserve already filters out 'pendientes' from 'reservaTotal'
 
-            // Smart Reserve Calculation
-            if (exp.frequency !== 'MONTHLY' && days >= 0) {
-                const monthsDisp = Math.max(1, Math.floor(days / 30));
-                reserve += exp.amount / monthsDisp;
-            }
-        });
+        return {
+            urgentCount: criticalItems.length,
+            reserveRequired: result.reservaTotal,
+            urgentItems: criticalItems.sort((a, b) => new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime())
+        };
+    }, [recurringExpenses, selectedDate]);
 
-        // Sort items by due date (ascending)
-        items.sort((a, b) => new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime());
-
-        return { urgentCount: count, reserveRequired: reserve, urgentItems: items };
-    }, [recurringExpenses]);
 
     const loadDemoData = async () => {
         alert("La carga de datos de demostración está deshabilitada durante la migración a la nube.");
@@ -135,16 +124,14 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                     </div>
 
                     {/* Suggested Reserve */}
-                    {reserveRequired > 0 && (
-                        <div className="flex justify-between items-center border-t border-slate-700/50 pt-2 animate-in fade-in">
-                            <div className="text-[10px] text-indigo-400 font-medium uppercase tracking-wider flex items-center gap-1">
-                                <PiggyBank size={12} /> Reserva Info.
-                            </div>
-                            <div className="font-bold text-indigo-400">
-                                {formatCurrency(reserveRequired)}/m
-                            </div>
+                    <div className="flex justify-between items-center border-t border-slate-700/50 pt-2 animate-in fade-in">
+                        <div className="text-[10px] text-indigo-400 font-medium uppercase tracking-wider flex items-center gap-1">
+                            <PiggyBank size={12} /> Reserva Info.
                         </div>
-                    )}
+                        <div className="font-bold text-indigo-400">
+                            {formatCurrency(reserveRequired)}/m
+                        </div>
+                    </div>
 
                     {/* Credit Available (Only for CCs) */}
                     <div className="flex justify-between items-center border-t border-slate-700/50 pt-2">

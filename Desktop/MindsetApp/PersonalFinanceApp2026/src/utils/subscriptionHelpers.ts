@@ -125,28 +125,54 @@ export function calculateSmartReserve(
     const todayStr = today.toISOString().split('T')[0];
 
     expenses
-        .filter(exp => exp.frequency !== 'MONTHLY' && exp.active)
+        .filter(exp => exp.active) // Check ALL active expenses for urgency, not just annuals
         .forEach(exp => {
             const diasHasta = daysBetween(todayStr, exp.nextDueDate);
 
             // 1. Check if it's already due or urgent (Override functionality)
+            // RESTORED TO 30 DAYS as per original requirement to show "Próximos" alerts
             if (diasHasta < 0) {
                 results.vencidos.push(exp);
+                // Important: Even if overdue, annuals still need reserve calc if not fully paid? 
+                // Usually overdue means "pay now", so no reserve needed for accumulation.
                 return;
             } else if (diasHasta <= 30) {
                 results.urgentes.push(exp);
+                // If it's urgent (due this month), we probably still want to see the reserve breakdown?
+                // But typically it moves to the "Critical" list.
                 return;
             }
 
-            // 2. Planning Logic (Check configured start Date)
-            const reservationConfig = exp.reservation; // Assuming this exists on RecurringExpense
-            const startDate = reservationConfig?.startDate ? new Date(reservationConfig.startDate) : null;
+            // IF it is monthly, we don't calculate reserves, so we return here if not urgent
+            if (exp.frequency === 'MONTHLY') return;
 
-            // If we have a start date and it's in the future
-            if (startDate && startDate > today) {
-                results.pendientes.push({ exp, startDate: startDate.toISOString().split('T')[0] });
-                // We do NOT add to reservaTotal
-                return;
+            // ... Reserve Logic continues for NON-MONTHLY ...
+
+            // 2. Planning Logic (Check configured start Date)
+            const reservationConfig = exp.reservation;
+
+            // Manual Parse to avoid timezone offset issues (e.g. 2026-05-01 becoming April 30)
+            let startYear = 0;
+            let startMonthIndex = 0; // 0-based
+
+            if (reservationConfig?.startDate) {
+                const parts = reservationConfig.startDate.split('-'); // YYYY-MM-DD
+                if (parts.length === 3) {
+                    startYear = parseInt(parts[0], 10);
+                    startMonthIndex = parseInt(parts[1], 10) - 1;
+                }
+            }
+
+            // If we have a valid start date logic
+            if (startYear > 0) {
+                const startMonthTotal = startYear * 12 + startMonthIndex;
+                const currentMonthTotal = today.getFullYear() * 12 + today.getMonth();
+
+                if (startMonthTotal > currentMonthTotal) {
+                    results.pendientes.push({ exp, startDate: reservationConfig!.startDate! });
+                    // We do NOT add to reservaTotal
+                    return;
+                }
             }
 
             // 3. Active Reserve Calculation (It's time to save!)
