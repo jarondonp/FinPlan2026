@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock, CreditCard } from 'lucide-react';
+import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock, CreditCard, History, Edit3 } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,9 @@ import { useGlobalFilter } from '../../context/GlobalFilterContext';
 import { closingService } from '../../services/ClosingService';
 import { hybridBudgetService } from '../../services/HybridBudgetService';
 import { calculateGoalQuota } from '../../utils/subscriptionHelpers';
+import { EditHistoryModal } from './EditHistoryModal';
+import { BudgetEditHistoryService } from '../../services/BudgetEditHistoryService';
+import { BudgetItem } from '../../types/budgetEditHistory';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;
@@ -41,6 +44,8 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
     const [isEditingBudgets, setIsEditingBudgets] = useState(false);
 
     const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+    const [showHistory, setShowHistory] = useState(false);
+    const [editingCategory, setEditingCategory] = useState<{ category: string, items: BudgetItem[], total: number } | null>(null);
 
     // Fetch Hybrid Budget Data
     const fetchBudget = async () => {
@@ -368,6 +373,17 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             <PiggyBank size={18} className="text-emerald-600" /> Presupesto Híbrido
                         </h3>
                         <div className="flex gap-2">
+
+                            <button
+                                onClick={() => setShowHistory(true)}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-200"
+                            >
+                                <History size={14} />
+                                Historial
+                            </button>
+
+
+
                             {isMonthClosed ? (
                                 <span className="text-xs font-bold text-slate-400 px-3 py-1.5 bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200 cursor-not-allowed">
                                     <AlertTriangle size={12} /> Mes Cerrado - Lectura
@@ -596,8 +612,18 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                         </div>
                     </div>
                 </div >
-            </div >
-        </div >
+            </div>
+            {/* Edit History Modal */}
+            {showHistory && user && (
+                <EditHistoryModal
+                    userId={user.uid}
+                    scope={scope.toUpperCase() as any}
+                    month={timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}
+                    onClose={() => setShowHistory(false)}
+                />
+            )}
+        </div>
     );
 };
+
 
