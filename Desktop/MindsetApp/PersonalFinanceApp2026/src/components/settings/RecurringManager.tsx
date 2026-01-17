@@ -5,7 +5,7 @@ import { db } from '../../firebase/config';
 import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
-import { IncomeSource, RecurringExpense, RecurringFrequency, CategoryDef } from '../../types';
+import { IncomeSource, RecurringExpense, RecurringFrequency, CategoryDef, Account } from '../../types';
 import { generateId, formatCurrency } from '../../utils';
 import { Calendar, DollarSign, Plus, Trash2, CheckCircle, Repeat, ArrowRight, AlertTriangle, Search, Filter, StickyNote, FileText, Table as TableIcon, CreditCard, X, Edit2 } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
@@ -24,6 +24,9 @@ export const RecurringManager = () => {
 
     const { data: allCategories } = useFirestore<CategoryDef>('categories');
     const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
+
+    const { data: allAccounts } = useFirestore<Account>('accounts');
+    const accounts = (allAccounts || []).filter(a => a.scope === scope || (scope === 'PERSONAL' && !a.scope));
 
     // Sort expenses by urgency
     const sortedExpenses = [...expenses].sort((a, b) => {
@@ -186,6 +189,7 @@ export const RecurringManager = () => {
             startDate: newExpense.startDate || new Date().toISOString().split('T')[0],
             nextDueDate: newExpense.nextDueDate,
             scope: scope,
+            account_id: newExpense.account_id,
             notes: newExpense.notes || '',
             dueDay: dueDay // Legacy support
         };
@@ -263,6 +267,19 @@ export const RecurringManager = () => {
                             >
                                 <option value="MONTHLY">Mensual</option>
                                 <option value="BIWEEKLY">Quincenal</option>
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500">Cuenta de Destino</label>
+                            <select
+                                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                                value={newIncome.account_id || ''}
+                                onChange={e => setNewIncome({ ...newIncome, account_id: e.target.value })}
+                            >
+                                <option value="">Seleccionar Cuenta (Opcional)</option>
+                                {accounts.map(acc => (
+                                    <option key={acc.id} value={acc.id}>{acc.name} ({acc.institution})</option>
+                                ))}
                             </select>
                         </div>
                         <div className="flex gap-2 items-center">
@@ -345,6 +362,21 @@ export const RecurringManager = () => {
                             >
                                 <option value="">Categoría</option>
                                 {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                            </select>
+                        </div>
+
+                        {/* Account Selector */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-500">Cuenta de Pago</label>
+                            <select
+                                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                                value={newExpense.account_id || ''}
+                                onChange={e => setNewExpense({ ...newExpense, account_id: e.target.value })}
+                            >
+                                <option value="">Seleccionar Cuenta (Opcional)</option>
+                                {accounts.map(acc => (
+                                    <option key={acc.id} value={acc.id}>{acc.name} ({acc.institution})</option>
+                                ))}
                             </select>
                         </div>
 

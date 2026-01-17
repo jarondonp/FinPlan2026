@@ -89,6 +89,7 @@ export interface IncomeSource {
   frequency: 'MONTHLY' | 'BIWEEKLY';
   payDay1: number; // 1-31
   payDay2?: number; // If Bi-weekly (usually +15 days from day1)
+  account_id?: string; // Target account for income
   notes?: string;
   scope?: Scope;
 }
@@ -119,6 +120,7 @@ export interface RecurringExpense {
   category: string;
   active: boolean;
   autoPay: boolean; // If true, funds deducted automatically
+  account_id?: string; // Source account for payment
   notes?: string;
 
   // Smart Reserve Settings

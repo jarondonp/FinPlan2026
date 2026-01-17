@@ -39,13 +39,16 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     const transactions = (allTransactions || []).filter(t => t.scope === scope || (scope === 'PERSONAL' && !t.scope));
 
     // Accounts are fetched via the hook which we already updated
-    const accounts = useAccountBalance(scope);
+    const accounts = useAccountBalance(scope, timeframe.end);
 
     const { data: allCategories } = useFirestore<any>('categories');
     const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
 
     const { data: allRecurring } = useFirestore<any>('recurringExpenses');
     const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
+
+    const { data: allIncomeSources } = useFirestore<any>('incomeSources');
+    const incomeSources = (allIncomeSources || []).filter(i => i.scope === scope || (scope === 'PERSONAL' && !i.scope));
 
     // State for alert details
     const [expandedAlerts, setExpandedAlerts] = useState<Record<number, boolean>>({});
@@ -81,19 +84,46 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
     }, { totalLiquidity: 0, totalDebt: 0 });
 
     const monthlyStats = useMemo(() => {
-        return transactions.reduce((stats, t) => {
-            // Check Timeframe
-            if (!isTransactionInTimeframe(t.date)) return stats;
+        const stats = { income: 0, expense: 0 };
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-            // Check Account Filter
-            if (selectedAccountIds.length > 0 && !selectedAccountIds.includes(t.account_id)) return stats;
+        // A. Process Confirmed Transactions
+        transactions.forEach(t => {
+            if (!isTransactionInTimeframe(t.date)) return;
+            if (selectedAccountIds.length > 0 && !selectedAccountIds.includes(t.account_id)) return;
 
             if (t.type === 'INCOME') stats.income += t.amount;
             if (t.type === 'EXPENSE') stats.expense += Math.abs(t.amount);
+        });
 
-            return stats;
-        }, { income: 0, expense: 0 });
-    }, [transactions, timeframe, selectedAccountIds]);
+        // B. Process Projections (Only if the timeframe is in the future)
+        // If the month selected is future, we show full projection.
+        if (timeframe.start > today) {
+            // Projected Income
+            incomeSources.forEach(i => {
+                if (selectedAccountIds.length > 0 && i.account_id && !selectedAccountIds.includes(i.account_id)) return;
+                const monthlyTotal = i.frequency === 'BIWEEKLY' ? i.amount * 2 : i.amount;
+                stats.income += monthlyTotal;
+            });
+
+            // Projected Expenses
+            recurringExpenses.forEach(r => {
+                if (!r.active) return;
+                if (selectedAccountIds.length > 0 && r.account_id && !selectedAccountIds.includes(r.account_id)) return;
+
+                let monthlyImpact = 0;
+                if (r.frequency === 'MONTHLY') monthlyImpact = r.amount;
+                else if (r.frequency === 'QUARTERLY') monthlyImpact = r.amount / 3;
+                else if (r.frequency === 'SEMI_ANNUAL') monthlyImpact = r.amount / 6;
+                else if (r.frequency === 'ANNUAL') monthlyImpact = r.amount / 12;
+
+                stats.expense += monthlyImpact;
+            });
+        }
+
+        return stats;
+    }, [transactions, timeframe, selectedAccountIds, incomeSources, recurringExpenses]);
 
     // Financial Health / Consistency Check
     const consistencyIssues = useMemo(() => {
@@ -140,8 +170,13 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
 
     // --- Subscription Alerts Logic ---
     const subscriptionAlerts = useMemo(() => {
-        // Use the CENTRALIZED smart calculation
-        const result = calculateSmartReserve(recurringExpenses, selectedDate);
+        // Filter expenses by account if filter is active
+        const filteredExpenses = selectedAccountIds.length > 0
+            ? recurringExpenses.filter(r => r.account_id && selectedAccountIds.includes(r.account_id))
+            : recurringExpenses;
+
+        // Use the CENTRALIZED smart calculation with filtered expenses
+        const result = calculateSmartReserve(filteredExpenses, selectedDate);
 
 
         // Map 'critical' (Overdue + Urgent)
