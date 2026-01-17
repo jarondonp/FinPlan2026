@@ -543,6 +543,15 @@ export const hybridBudgetService = {
                 const totalDebtService = totalMin + debtSettings.extraPayment;
 
                 const debtCategoryName = "Servicio de Deuda";
+
+                const debtItems = [
+                    { id: 'plan_debt_min', name: 'Mínimos Estimados', amount: totalMin }
+                ];
+
+                if (debtSettings.extraPayment > 0) {
+                    debtItems.push({ id: 'plan_debt_extra', name: 'Pago Extra Planificado', amount: debtSettings.extraPayment });
+                }
+
                 breakdown.set(debtCategoryName, {
                     category: debtCategoryName,
                     fixed: totalDebtService,
@@ -551,7 +560,7 @@ export const hybridBudgetService = {
                     totalLimit: totalDebtService,
                     spent: 0,
                     details: {
-                        fixed: [{ id: 'plan_debt', name: 'Plan de Deuda (Min + Extra)', amount: totalDebtService }],
+                        fixed: debtItems,
                         reserved: [],
                         variable: []
                     }
