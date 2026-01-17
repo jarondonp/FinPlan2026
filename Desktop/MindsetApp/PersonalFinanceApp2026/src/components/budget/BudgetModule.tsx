@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock } from 'lucide-react';
+import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock, CreditCard } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
@@ -170,7 +170,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
 
                         <div className="flex-1 w-full text-center md:text-left">
                             <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Por Asignar</span>
-                            <div className={`text-2xl font-mono font-bold ${projectedIncome - totalBudgeted < 0 ? 'text-rose-400' : 'text-indigo-400'}`}>
+                            <div className={`text - 2xl font - mono font - bold ${projectedIncome - totalBudgeted < 0 ? 'text-rose-400' : 'text-indigo-400'} `}>
                                 {formatCurrency(projectedIncome - totalBudgeted)}
                             </div>
                         </div>
@@ -236,67 +236,69 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                                         value={newGoal.monthlyQuota || ""}
                                         onChange={e => setNewGoal({ ...newGoal, monthlyQuota: parseFloat(e.target.value) })}
                                     />
-                                </div>
-                            </div>
+                                </div >
+                            </div >
                             <button onClick={handleAddGoal} className="w-full py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm">Crear Meta</button>
-                        </div>
+                        </div >
                     )}
 
-                    {editingGoal && (
-                        <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm animate-in slide-in-from-top-2">
-                            <h4 className="text-xs font-bold text-amber-600 uppercase mb-3 px-1">Editar Meta</h4>
-                            <div className="space-y-3">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Nombre</label>
-                                        <input className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.name || ""} onChange={e => setEditingGoal({ ...editingGoal, name: e.target.value })} />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Objetivo ($)</label>
-                                        <input type="number" className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.targetAmount || ""} onChange={e => setEditingGoal({ ...editingGoal, targetAmount: parseFloat(e.target.value) })} />
-                                    </div>
-                                    <div className="col-span-2">
-                                        <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Ahorro Actual ($)</label>
-                                        <input type="number" className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.currentAmount || ""} onChange={e => setEditingGoal({ ...editingGoal, currentAmount: parseFloat(e.target.value) })} />
-                                    </div>
-                                </div>
-
-                                <div className="border-t pt-3">
-                                    <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
-                                        📅 Período de Ahorro
-                                    </h5>
+                    {
+                        editingGoal && (
+                            <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm animate-in slide-in-from-top-2">
+                                <h4 className="text-xs font-bold text-amber-600 uppercase mb-3 px-1">Editar Meta</h4>
+                                <div className="space-y-3">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="text-[10px] font-bold text-emerald-600 uppercase mb-1 block">Fecha Inicio</label>
-                                            <input type="date" className="px-3 py-2 border border-emerald-200 rounded-lg text-sm w-full" value={editingGoal.startDate || ""} onChange={e => setEditingGoal({ ...editingGoal, startDate: e.target.value })} />
+                                            <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Nombre</label>
+                                            <input className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.name || ""} onChange={e => setEditingGoal({ ...editingGoal, name: e.target.value })} />
                                         </div>
                                         <div>
-                                            <label className="text-[10px] font-bold text-rose-600 uppercase mb-1 block">Fecha Objetivo</label>
-                                            <input type="date" className="px-3 py-2 border border-rose-200 rounded-lg text-sm w-full" value={editingGoal.targetDate || editingGoal.deadline || ""} onChange={e => setEditingGoal({ ...editingGoal, targetDate: e.target.value, deadline: e.target.value })} />
+                                            <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Objetivo ($)</label>
+                                            <input type="number" className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.targetAmount || ""} onChange={e => setEditingGoal({ ...editingGoal, targetAmount: parseFloat(e.target.value) })} />
+                                        </div>
+                                        <div className="col-span-2">
+                                            <label className="text-[10px] font-bold text-slate-600 uppercase mb-1 block">Ahorro Actual ($)</label>
+                                            <input type="number" className="px-3 py-2 border rounded-lg text-sm w-full" value={editingGoal.currentAmount || ""} onChange={e => setEditingGoal({ ...editingGoal, currentAmount: parseFloat(e.target.value) })} />
                                         </div>
                                     </div>
-                                </div>
 
-                                <div>
-                                    <label className="text-[10px] font-bold text-indigo-600 uppercase mb-1 block">Cuota Mensual (Opcional)</label>
-                                    <input
-                                        type="number"
-                                        placeholder={(() => {
-                                            const autoQuota = calculateGoalQuota({ ...editingGoal, monthlyQuota: undefined });
-                                            return autoQuota > 0 ? `Sugerencia automática: $${autoQuota.toFixed(2)}/mes` : 'Dejar vacío para usar sugerencia';
-                                        })()}
-                                        className="px-3 py-2 border border-indigo-200 rounded-lg text-sm w-full"
-                                        value={editingGoal.monthlyQuota || ""}
-                                        onChange={e => setEditingGoal({ ...editingGoal, monthlyQuota: parseFloat(e.target.value) })}
-                                    />
+                                    <div className="border-t pt-3">
+                                        <h5 className="text-[10px] font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
+                                            📅 Período de Ahorro
+                                        </h5>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-[10px] font-bold text-emerald-600 uppercase mb-1 block">Fecha Inicio</label>
+                                                <input type="date" className="px-3 py-2 border border-emerald-200 rounded-lg text-sm w-full" value={editingGoal.startDate || ""} onChange={e => setEditingGoal({ ...editingGoal, startDate: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-rose-600 uppercase mb-1 block">Fecha Objetivo</label>
+                                                <input type="date" className="px-3 py-2 border border-rose-200 rounded-lg text-sm w-full" value={editingGoal.targetDate || editingGoal.deadline || ""} onChange={e => setEditingGoal({ ...editingGoal, targetDate: e.target.value, deadline: e.target.value })} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] font-bold text-indigo-600 uppercase mb-1 block">Cuota Mensual (Opcional)</label>
+                                        <input
+                                            type="number"
+                                            placeholder={(() => {
+                                                const autoQuota = calculateGoalQuota({ ...editingGoal, monthlyQuota: undefined });
+                                                return autoQuota > 0 ? `Sugerencia automática: $${autoQuota.toFixed(2)}/mes` : 'Dejar vacío para usar sugerencia';
+                                            })()}
+                                            className="px-3 py-2 border border-indigo-200 rounded-lg text-sm w-full"
+                                            value={editingGoal.monthlyQuota || ""}
+                                            onChange={e => setEditingGoal({ ...editingGoal, monthlyQuota: parseFloat(e.target.value) })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setEditingGoal(null)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold text-sm">Cancelar</button>
+                                    <button onClick={handleUpdateGoal} className="flex-1 py-2 bg-amber-500 text-white rounded-lg font-bold text-sm">Guardar Cambios</button>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => setEditingGoal(null)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold text-sm">Cancelar</button>
-                                <button onClick={handleUpdateGoal} className="flex-1 py-2 bg-amber-500 text-white rounded-lg font-bold text-sm">Guardar Cambios</button>
-                            </div>
-                        </div>
-                    )}
+                        )
+                    }
 
                     <div className="grid grid-cols-1 gap-4">
                         {goals.map(goal => {
@@ -357,10 +359,10 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             );
                         })}
                     </div>
-                </div>
+                </div >
 
                 {/* --- Hybrid Budgets Section --- */}
-                <div className="space-y-6">
+                < div className="space-y-6" >
                     <div className="flex justify-between items-center">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                             <PiggyBank size={18} className="text-emerald-600" /> Presupesto Híbrido
@@ -466,6 +468,36 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                                                                 )}
                                                             </div>
                                                         </div>
+                                                    ) : cat.category === "Servicio de Deuda" ? (
+                                                        /* For "Servicio de Deuda", show debt list directly */
+                                                        <div className="bg-white rounded-xl border border-rose-200 p-3 shadow-inner">
+                                                            <h5 className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-3 border-b border-rose-100 pb-1 flex items-center gap-1">
+                                                                <CreditCard size={12} /> Deudas del Mes
+                                                            </h5>
+                                                            <div className="space-y-2">
+                                                                {/* Combine all debt items from fixed and reserved */}
+                                                                {(() => {
+                                                                    const allDebtItems = [
+                                                                        ...(cat.details?.fixed || []),
+                                                                        ...(cat.details?.reserved || [])
+                                                                    ];
+
+                                                                    return allDebtItems.length === 0 ? (
+                                                                        <p className="text-xs text-slate-400 italic text-center py-2">No hay pagos de deuda este mes.</p>
+                                                                    ) : (
+                                                                        allDebtItems.map((item: any) => (
+                                                                            <div key={item.id} className="flex justify-between items-center text-xs p-2 bg-rose-50/50 hover:bg-rose-100/50 rounded-lg group transition-colors border border-rose-100">
+                                                                                <span className="font-medium text-slate-700">{item.name}</span>
+                                                                                <div className="text-right">
+                                                                                    <div className="font-mono font-bold text-rose-700">{formatCurrency(item.amount)}</div>
+                                                                                    {item.notice && <div className="text-[10px] text-rose-500 font-medium">{item.notice}</div>}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))
+                                                                    );
+                                                                })()}
+                                                            </div>
+                                                        </div>
                                                     ) : (
                                                         <>
                                                             {/* Summary Boxes (Clickable) - Only for regular categories */}
@@ -563,9 +595,9 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             </button>
                         </div>
                     </div>
-                </div>
-            </div>
-        </div>
+                </div >
+            </div >
+        </div >
     );
 };
 
