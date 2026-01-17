@@ -7,6 +7,7 @@ import { formatCurrency, generateId } from '../../utils';
 import { Wallet, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
 import { useScope } from '../../context/GlobalFilterContext';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
+import { DebtIndicator } from './DebtIndicator';
 
 export const AccountManager = () => {
     const { scope } = useScope();
@@ -121,8 +122,8 @@ export const AccountManager = () => {
                     editingId === acc.id ? (
                         <AccountEditor key={acc.id} form={editForm} setForm={setEditForm} onSave={handleSave} onCancel={() => setEditingId(null)} />
                     ) : (
-                        <div key={acc.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group">
-                            <div className="flex justify-between items-start mb-2">
+                        <div key={acc.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between group relative overflow-hidden">
+                            <div className="flex justify-between items-start mb-2 relative z-10">
                                 <div>
                                     <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">{acc.type}</div>
                                     <h4 className="font-bold text-slate-800 text-lg">{acc.name}</h4>
@@ -134,23 +135,26 @@ export const AccountManager = () => {
                             </div>
 
                             {(acc.type === 'Credit Card' || acc.type === 'Loan') && (
-                                <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-xs">
-                                    <div>
-                                        <span className="text-slate-400 block">APR</span>
-                                        <span className="font-bold text-slate-700">{acc.apr}%</span>
+                                <>
+                                    <DebtIndicator accountId={acc.id} accounts={accounts} />
+                                    <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-xs relative z-10">
+                                        <div>
+                                            <span className="text-slate-400 block">APR</span>
+                                            <span className="font-bold text-slate-700">{acc.apr}%</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-400 block">Corte</span>
+                                            <span className="font-bold text-slate-700">Día {acc.closingDay || '-'}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-400 block">Límite</span>
+                                            <span className="font-bold text-slate-700">{acc.limit ? formatCurrency(acc.limit) : '-'}</span>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <span className="text-slate-400 block">Corte</span>
-                                        <span className="font-bold text-slate-700">Día {acc.closingDay || '-'}</span>
-                                    </div>
-                                    <div>
-                                        <span className="text-slate-400 block">Límite</span>
-                                        <span className="font-bold text-slate-700">{acc.limit ? formatCurrency(acc.limit) : '-'}</span>
-                                    </div>
-                                </div>
+                                </>
                             )}
 
-                            <div className="mt-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                            <div className="mt-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end relative z-10">
                                 <button onClick={() => handleEdit(acc)} className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-lg transition-colors">
                                     <Edit2 size={16} />
                                 </button>

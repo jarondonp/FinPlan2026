@@ -61,7 +61,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             setIsMonthClosed(status === 'CLOSED' || status === 'LOCKED');
         };
         fetchBudget();
-    }, [scope, timeframe]);
+    }, [scope, timeframe.mode, timeframe.start, timeframe.end]);
 
     const handleUpdateVariable = async (catName: string, amount: number) => {
         if (!user || isMonthClosed) return;

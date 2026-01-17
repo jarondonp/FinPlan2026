@@ -1,10 +1,15 @@
 import { db, auth } from '../firebase/config';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { Scope, RecurringExpense, MonthlyBudget, CategoryDef, IncomeSource } from '../types';
+import { Scope, RecurringExpense, MonthlyBudget, CategoryDef, IncomeSource, Account } from '../types';
 import { generateId } from '../utils';
 import { calculateSmartReserveForExpense } from '../utils/subscriptionHelpers';
+import { debtService } from './DebtService';
 
-interface CategoryBudgetBreakdown {
+// ... (existing interfaces)
+
+// ... (existing helper)
+
+export interface CategoryBudgetBreakdown {
     category: string;
     fixed: number;      // From Recurring Expenses (Recurrentes)
     reserved: number;   // From Smart Reserves (Reservas)
@@ -26,14 +31,7 @@ export interface BudgetDetailItem {
     notice?: string;
 }
 
-// Helper to check if a recurring expense hits in this month
-// Simple version: If monthly, yes. If others, check dates.
-// For MVP, we'll assume Monthly recurring expenses hit every month.
-// Future: Use 'nextPaymentDate' logic.
 const isRecurringActiveInMonth = (expense: RecurringExpense, month: Date): boolean => {
-    // TODO: Implement logic for bi-monthly/annual based on start date.
-    // For now, assume all active recurring expenses contribute to the monthly "base" 
-    // to keep the budget conservative (always prepared).
     return expense.active;
 };
 
@@ -75,6 +73,61 @@ export const hybridBudgetService = {
                 }
             });
         });
+
+        // --- NEW: INJECT DEBT SERVICE CATEGORY ---
+        // Fetch Accounts (for balances/mins) and Debt Settings (for extra payment)
+        // We do this parallel to recurring expenses to save time, or just sequential.
+
+        try {
+            const [accountsSnap, debtSettings] = await Promise.all([
+                getDocs(collection(db, 'users', user.uid, 'accounts')),
+                debtService.getDebtSettings(user.uid)
+            ]);
+
+            const debtAccounts = accountsSnap.docs
+                .map(d => d.data() as Account)
+                .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && Math.abs(a.balance) > 1);
+
+            if (debtAccounts.length > 0) {
+                // Calculate Total Monthly Commitment
+                const totalMin = debtAccounts.reduce((sum, a) => sum + (a.minPayment || Math.abs(a.balance) * 0.02), 0);
+                const totalDebtService = totalMin + debtSettings.extraPayment;
+
+                // Create Virtual Category
+                const debtCategoryName = "Servicio de Deuda";
+                breakdown.set(debtCategoryName, {
+                    category: debtCategoryName,
+                    fixed: totalDebtService, // It's a FIXED commitment
+                    reserved: 0,
+                    variable: 0,
+                    totalLimit: totalDebtService,
+                    spent: 0, // We will fill this later by checking transactions or DebtService status
+                    details: {
+                        fixed: [
+                            { id: 'min_total', name: 'Mínimos Obligatorios', amount: totalMin },
+                            { id: 'extra_pament', name: 'Estrategia Aceleradora', amount: debtSettings.extraPayment }
+                        ],
+                        reserved: [],
+                        variable: []
+                    }
+                });
+
+                // Ideally we should also fetch actual payments made to debit against this category.
+                // For now, let's leave 'spent' as 0 or implement a quick check if needed.
+                // The 'Debt Command Center' tracks this. The Budget view just reserves the money.
+                // If we want the bar to fill, we need to sum payments.
+                // Use debtService logic to get actual payments?
+                const paymentStatus = await debtService.fetchActualPayments(user.uid, monthStr, debtAccounts.map(a => a.id));
+                let totalPaid = 0;
+                paymentStatus.forEach(val => totalPaid += val);
+
+                const debtEntry = breakdown.get(debtCategoryName)!;
+                debtEntry.spent = totalPaid;
+            }
+        } catch (error) {
+            console.error("Error calculating debt service for budget:", error);
+        }
+        // -----------------------------------------
 
         // 2. Fetch ALL Recurring Expenses (filtering in memory)
         const recurringSnap = await getDocs(collection(db, 'users', user.uid, 'recurringExpenses'));

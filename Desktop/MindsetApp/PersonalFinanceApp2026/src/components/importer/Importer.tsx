@@ -27,6 +27,10 @@ export const Importer = () => {
     const { data: allRules } = useFirestore<Rule>('rules');
     const rules = (allRules || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
+    // NEW: Fetch categories for AI
+    const { data: allCategories } = useFirestore<import('../../types').CategoryDef>('categories');
+    const categories = (allCategories || []).filter(c => c.scope === scope || (scope === 'PERSONAL' && !c.scope));
+
     // State
     const [step, setStep] = useState<ImportStep>('UPLOAD');
     const [rawText, setRawText] = useState("");
@@ -212,6 +216,44 @@ export const Importer = () => {
 
         setPreviewData(mappedTransactions);
         setStep('PREVIEW');
+    };
+
+    // --- NEW: AI Batch Categorization ---
+    const handleAICategorization = async () => {
+        const uncategorized = previewData.filter(t => t.category === 'Uncategorized');
+        if (uncategorized.length === 0) return alert("¡Todo ya está categorizado!");
+        if (!categories || categories.length === 0) return alert("No tienes categorías definidas para que la IA elija.");
+
+        setIsAnalyzing(true);
+        try {
+            const aiService = await import('../../services/aiService').then(m => m.aiService);
+
+            // Prepare inputs (Unique descriptions to save tokens)
+            const uniqueDesc = Array.from(new Set(uncategorized.map(t => t.description_normalized)));
+            const itemsToCategorize = uniqueDesc.map((desc, i) => ({ id: i.toString(), description: desc }));
+            const categoryNames = categories.map(c => c.name);
+
+            // Call AI
+            const results = await aiService.categorizeTransactions(itemsToCategorize, categoryNames);
+
+            // Update Preview Data
+            setPreviewData(prev => prev.map(t => {
+                if (t.category !== 'Uncategorized') return t;
+                const match = results.find(r => r.id === itemsToCategorize.find(i => i.description === t.description_normalized)?.id);
+                if (match && match.category !== 'Uncategorized') {
+                    // Try to finding exact casing from categories list (AI might return lowercase)
+                    const exactCat = categories.find(c => c.name.toLowerCase() === match.category.toLowerCase())?.name || match.category;
+                    return { ...t, category: exactCat, needs_review: true };
+                }
+                return t;
+            }));
+
+        } catch (error) {
+            console.error(error);
+            alert("Error conectando con Gemini AI.");
+        } finally {
+            setIsAnalyzing(false);
+        }
     };
 
     // --- Step 3: Analyze & Save ---
@@ -560,6 +602,17 @@ export const Importer = () => {
                                             </button>
                                         ))}
                                     </div>
+
+                                    {/* AI Categorize Button */}
+                                    {previewData.some(t => t.category === 'Uncategorized') && (
+                                        <button
+                                            onClick={handleAICategorization}
+                                            disabled={isAnalyzing}
+                                            className="px-4 py-2 bg-violet-100 text-violet-700 font-bold rounded-lg hover:bg-violet-200 flex items-center gap-2 transition-colors border border-violet-200"
+                                        >
+                                            {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : "✨ Categorizar Vacías"}
+                                        </button>
+                                    )}
 
                                     <button onClick={handleAnalyze} disabled={selectedIndices.size === 0 || isAnalyzing} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-700 flex items-center gap-2 disabled:opacity-50 disabled:grayscale transition-all">
                                         {isAnalyzing ? (
