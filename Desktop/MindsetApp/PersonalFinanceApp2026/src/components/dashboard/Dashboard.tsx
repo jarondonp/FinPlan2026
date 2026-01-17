@@ -388,189 +388,206 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                 </div>
             )}
 
-            {/* Personal Cards (Hidden if Business) */}
+            {/* Personal Cards (Reorganized) */}
             {scope === 'PERSONAL' && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    {/* Saldo en Cheques - Only Checking/Savings */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
-                                <DollarSign size={24} />
+                <div className="space-y-8">
+                    {/* Row 1: KPIs (4 Columns) */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        {/* 1. Saldo en Cheques */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
+                                    <DollarSign size={24} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Saldo en Cuentas</span>
                             </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Saldo en Cheques</span>
+                            <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
+                            <div className="text-xs text-slate-500 mt-2">Efectivo disponible</div>
                         </div>
-                        <div className="text-3xl font-bold text-slate-900">{formatCurrency(totalLiquidity)}</div>
-                        <div className="text-xs text-slate-500 mt-2">Efectivo disponible</div>
+
+                        {/* 2. Ingresos (Mes) - Moved Up */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                                    <ArrowUpRight size={24} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingresos (Mes)</span>
+                            </div>
+                            <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
+                        </div>
+
+                        {/* 3. Gastos (Mes) - Moved Here */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                                    <ArrowDownRight size={24} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gastos (Mes)</span>
+                            </div>
+                            <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
+                        </div>
+
+                        {/* 4. Deuda Total + Crédito Disponible (Merged) */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                            <div className="flex justify-between items-start mb-2">
+                                <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
+                                    <CreditCard size={24} />
+                                </div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Deuda Total</span>
+                            </div>
+
+                            <div className="text-3xl font-bold text-rose-600 mb-1">{formatCurrency(totalDebt)}</div>
+
+                            {/* Available Credit Context */}
+                            {(() => {
+                                const creditData = activeAccounts
+                                    .filter(a => a.type === 'Credit Card')
+                                    .reduce((acc, a) => {
+                                        const debt = Math.abs(a.dynamicBalance || 0);
+                                        const limit = a.limit || 0;
+                                        return { debt: acc.debt + debt, limit: acc.limit + limit };
+                                    }, { debt: 0, limit: 0 });
+
+                                const available = Math.max(0, creditData.limit - creditData.debt);
+                                const usagePercent = creditData.limit > 0 ? (creditData.debt / creditData.limit) * 100 : 0;
+
+                                return (
+                                    <div className="mt-3">
+                                        <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
+                                            <span>Disponible: <span className="text-emerald-600">{formatCurrency(available)}</span></span>
+                                            <span>{usagePercent.toFixed(0)}% Uso</span>
+                                        </div>
+                                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full ${usagePercent > 80 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                                                style={{ width: `${Math.min(100, usagePercent)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
                     </div>
 
-                    {/* Crédito Disponible TDC - Available credit from credit cards */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
-                                <CreditCard size={24} />
-                            </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Crédito Disponible</span>
-                        </div>
-                        <div className="text-3xl font-bold text-blue-600">
-                            {formatCurrency(activeAccounts
-                                .filter(a => a.type === 'Credit Card')
-                                .reduce((sum, a) => {
-                                    const debt = Math.abs(a.dynamicBalance || 0);
-                                    const limit = a.limit || 0;
-                                    return sum + Math.max(0, limit - debt);
-                                }, 0)
+                    {/* Row 2: Charts & Planning (2 Columns) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {/* Spending Chart */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[400px]">
+                            <h3 className="font-bold text-slate-800 mb-6">Gastos por Categoría</h3>
+                            {spendingByCategory.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="90%">
+                                    <PieChart>
+                                        <Pie
+                                            data={spendingByCategory}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={100}
+                                            fill="#8884d8"
+                                            paddingAngle={5}
+                                            dataKey="value"
+                                        >
+                                            {spendingByCategory.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip formatter={(val: number) => formatCurrency(val)} />
+                                        <Legend />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-slate-400">
+                                    No hay gastos registrados este mes.
+                                </div>
                             )}
                         </div>
-                        <div className="text-xs text-slate-500 mt-2">Límite - Deuda</div>
-                    </div>
 
-                    {/* Deuda Total - Unchanged */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                                <CreditCard size={24} />
-                            </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Deuda Total</span>
-                        </div>
-                        <div className="text-3xl font-bold text-rose-600">{formatCurrency(totalDebt)}</div>
-                        <div className="text-xs text-slate-500 mt-2">Tarjetas + Préstamos</div>
-                    </div>
-
-                    {/* Monthly Stats - Moved to 2nd row or keep as 4th item */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
-                                <ArrowUpRight size={24} />
-                            </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingresos (Mes)</span>
-                        </div>
-                        <div className="text-3xl font-bold text-emerald-600">{formatCurrency(monthlyStats.income)}</div>
-                    </div>
-                </div>
-            )}
-
-            {/* Second row for Gastos if needed, or merge into single row */}
-            {scope === 'PERSONAL' && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                                <ArrowDownRight size={24} />
-                            </div>
-                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gastos (Mes)</span>
-                        </div>
-                        <div className="text-3xl font-bold text-rose-600">{formatCurrency(monthlyStats.expense)}</div>
-                    </div>
-
-                    {/* NEW: Upcoming Annual Expenses Widget */}
-                    {subscriptionAlerts.upcomingNonMonthly.length > 0 && (
-                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm md:col-span-2">
-                            <div className="flex justify-between items-center mb-4">
+                        {/* Upcoming Expenses (Planning) */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[400px] flex flex-col">
+                            <div className="flex justify-between items-center mb-6">
                                 <div className="flex items-center gap-2">
                                     <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg">
                                         <Briefcase size={20} />
                                     </div>
-                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Próximos Gastos Anuales</span>
+                                    <span className="font-bold text-slate-800">Próximos Gastos Anuales</span>
                                 </div>
                                 <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-full text-slate-500 font-bold border border-slate-200">
                                     Reserva Sugerida
                                 </span>
                             </div>
 
-                            <div className="space-y-3">
-                                {subscriptionAlerts.upcomingNonMonthly.slice(0, 3).map((item, idx) => (
-                                    <div key={idx} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                                        <div>
-                                            <div className="font-bold text-slate-800 text-sm">{item.exp.name}</div>
-                                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                                                <span>{getFrequencyLabel(item.exp.frequency)}</span>
-                                                <span className={`${item.days <= 60 ? 'text-amber-600 font-medium' : ''}`}>
-                                                    Vence en {item.days} días
-                                                </span>
+                            {subscriptionAlerts.upcomingNonMonthly.length > 0 ? (
+                                <div className="flex-1 overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-slate-200">
+                                    {subscriptionAlerts.upcomingNonMonthly.map((item, idx) => (
+                                        <div key={idx} className="flex justify-between items-center p-3 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                                            <div>
+                                                <div className="font-bold text-slate-800 text-sm">{item.exp.name}</div>
+                                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                    <span>{getFrequencyLabel(item.exp.frequency)}</span>
+                                                    <span className={`${item.days <= 60 ? 'text-amber-600 font-medium' : ''}`}>
+                                                        Vence en {item.days} días
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="font-mono font-bold text-indigo-600">{formatCurrency(item.reserve)}/mes</div>
+                                                <div className="text-[10px] text-slate-400">Total: {formatCurrency(item.exp.amount)}</div>
                                             </div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className="font-mono font-bold text-indigo-600">{formatCurrency(item.reserve)}/mes</div>
-                                            <div className="text-[10px] text-slate-400">Total: {formatCurrency(item.exp.amount)}</div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex-1 flex items-center justify-center text-slate-400 text-sm p-4 text-center">
+                                    No hay gastos anuales próximos para planificar.
+                                </div>
+                            )}
+
+                            <button
+                                onClick={() => onNavigate('settings:recurring')}
+                                className="w-full mt-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-dashed border-indigo-200"
+                            >
+                                Administrar Suscripciones
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Row 3: Recent Transactions (Full Width) */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-bold text-slate-800">Transacciones Recientes</h3>
+                            <button onClick={() => onNavigate('import')} className="text-xs font-bold text-indigo-600 hover:text-indigo-700">Ver todas</button>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                            {transactions
+                                .filter(t => selectedAccountIds.length === 0 || selectedAccountIds.includes(t.account_id))
+                                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                .slice(0, 5)
+                                .map(t => (
+                                    <div key={t.id} className="py-4 flex items-center justify-between hover:bg-slate-50 px-2 rounded-lg transition-colors -mx-2">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`p-2 rounded-full ${t.amount > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                                {t.amount > 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-slate-800 text-sm">{t.description_normalized || t.description_original}</div>
+                                                <div className="text-xs text-slate-500">{new Date(t.date).toLocaleDateString()} • {t.category}</div>
+                                            </div>
+                                        </div>
+                                        <div className={`font-mono font-bold text-sm ${t.amount > 0 ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                            {formatCurrency(t.amount)}
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-                            {subscriptionAlerts.upcomingNonMonthly.length > 3 && (
-                                <button
-                                    onClick={() => onNavigate('settings:recurring')}
-                                    className="w-full mt-3 text-xs text-center text-slate-500 hover:text-indigo-600 py-1"
-                                >
-                                    Ver {subscriptionAlerts.upcomingNonMonthly.length - 3} más...
-                                </button>
-                            )}
                         </div>
-                    )}
+                        {transactions.length === 0 && (
+                            <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                <p>No hay transacciones recientes.</p>
+                                <button onClick={() => onNavigate('import')} className="mt-2 text-sm text-indigo-600 font-bold hover:underline">Importar Extracto</button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                {/* Spending Chart */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-[400px]">
-                    <h3 className="font-bold text-slate-800 mb-6">Gastos por Categoría</h3>
-                    {spendingByCategory.length > 0 ? (
-                        <ResponsiveContainer width="100%" height="90%">
-                            <PieChart>
-                                <Pie
-                                    data={spendingByCategory}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={100}
-                                    fill="#8884d8"
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                >
-                                    {spendingByCategory.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip formatter={(val: number) => formatCurrency(val)} />
-                                <Legend />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    ) : (
-                        <div className="flex items-center justify-center h-full text-slate-400">
-                            No hay gastos registrados este mes.
-                        </div>
-                    )}
-                </div>
-
-                {/* Recent Transactions */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <h3 className="font-bold text-slate-800 mb-6">Transacciones Recientes</h3>
-                    <div className="divide-y divide-slate-100">
-                        {transactions
-                            .filter(t => selectedAccountIds.length === 0 || selectedAccountIds.includes(t.account_id))
-                            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                            .slice(0, 5)
-                            .map(t => (
-                                <div key={t.id} className="py-4 flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-full ${t.amount > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                                            {t.amount > 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-slate-800 text-sm">{t.description_normalized || t.description_original}</div>
-                                            <div className="text-xs text-slate-500">{new Date(t.date).toLocaleDateString()} • {t.category}</div>
-                                        </div>
-                                    </div>
-                                    <div className={`font-mono font-bold text-sm ${t.amount > 0 ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                        {formatCurrency(t.amount)}
-                                    </div>
-                                </div>
-                            ))}
-                    </div>
-                    {transactions.length === 0 && (
-                        <div className="text-center py-8 text-slate-400">No hay transacciones recientes.</div>
-                    )}
-                </div>
-            </div>
         </div>
     );
 };
