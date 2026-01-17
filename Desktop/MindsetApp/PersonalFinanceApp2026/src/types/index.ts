@@ -57,10 +57,15 @@ export interface Goal {
   name: string;
   targetAmount: number;
   currentAmount: number;
-  deadline: string; // ISO Date YYYY-MM-DD
-  icon: string;
+  startDate: string;       // When to start saving (YYYY-MM-DD)
+  targetDate: string;      // When to reach the goal (YYYY-MM-DD)
+  monthlyQuota?: number;   // Optional manual override
   color: string;
+  icon: string;
   scope?: Scope;
+  account_id?: string;
+  // Legacy support
+  deadline?: string;       // Deprecated, use targetDate
 }
 
 export interface Rule {

@@ -2,8 +2,9 @@ import { db, auth } from '../firebase/config';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Scope, RecurringExpense, MonthlyBudget, CategoryDef, IncomeSource, Account } from '../types';
 import { generateId } from '../utils';
-import { calculateSmartReserveForExpense } from '../utils/subscriptionHelpers';
+import { calculateSmartReserveForExpense, calculateGoalQuota } from '../utils/subscriptionHelpers';
 import { debtService } from './DebtService';
+import { Goal } from '../types';
 
 // ... (existing interfaces)
 
@@ -222,13 +223,70 @@ export const hybridBudgetService = {
                 }
             });
 
+        // --- NEW: INJECT SAVINGS GOALS ---
+        try {
+            const goalsSnap = await getDocs(collection(db, 'users', user.uid, 'goals'));
+            const allGoals = goalsSnap.docs
+                .map(d => d.data() as Goal)
+                .filter(g => isInScope(g.scope));
+
+            // Filter goals that are active in this month
+            // A goal is active if its startDate is <= current month
+            const currentYear = month.getFullYear();
+            const currentMonth = month.getMonth(); // 0-indexed (0 = January, 1 = February, etc.)
+
+            const monthGoals = allGoals.filter(g => {
+                if (!g.startDate) return true; // Legacy goals without startDate are always active
+
+                const goalStart = new Date(g.startDate + 'T00:00:00');
+                // Goal is active if it starts on or before the current month
+                return goalStart.getFullYear() < currentYear ||
+                    (goalStart.getFullYear() === currentYear && goalStart.getMonth() <= currentMonth);
+            });
+
+            if (monthGoals.length > 0) {
+                const savingsCategoryName = "Metas de Patrimonio";
+                const savingsItems: BudgetDetailItem[] = [];
+                let totalSavingsQuota = 0;
+
+                monthGoals.forEach(g => {
+                    const quota = calculateGoalQuota(g);
+                    if (quota > 0) {
+                        totalSavingsQuota += quota;
+                        savingsItems.push({
+                            id: g.id,
+                            name: g.name,
+                            amount: quota,
+                            notice: (g.targetDate || g.deadline) ? `Hasta ${new Date(g.targetDate || g.deadline).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' })}` : 'Cuota fija'
+                        });
+                    }
+                });
+
+                if (totalSavingsQuota > 0) {
+                    breakdown.set(savingsCategoryName, {
+                        category: savingsCategoryName,
+                        fixed: 0,
+                        reserved: totalSavingsQuota,
+                        variable: 0,
+                        totalLimit: totalSavingsQuota,
+                        spent: 0,
+                        details: {
+                            fixed: [],
+                            reserved: savingsItems,
+                            variable: []
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            console.error("Error calculating savings goals for budget:", error);
+        }
+
         // 4. Fetch Actual Spending (Spent)
         const startStr = `${monthStr}-01`;
         const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
         const endStr = `${monthStr}-${lastDay}`;
 
-        // Fetch All Expenses for the month
-        // Fetch All Expenses for the month
         const txSnap = await getDocs(query(
             collection(db, 'users', user.uid, 'transactions'),
             where('date', '>=', startStr),
@@ -254,7 +312,6 @@ export const hybridBudgetService = {
             totalLimit: item.fixed + item.reserved + item.variable
         }));
 
-        // Sort by Total Limit (desc)
         return results.sort((a, b) => b.totalLimit - a.totalLimit);
     },
 

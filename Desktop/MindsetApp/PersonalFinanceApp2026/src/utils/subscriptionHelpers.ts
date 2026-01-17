@@ -225,9 +225,22 @@ export function getFrequencyLabel(frequency: RecurringFrequency): string {
  * Evita el bache de zona horaria de 'new Date(str)'
  */
 export function parseLocalISOString(dateStr: string): Date {
-    const parts = dateStr.split('-');
-    if (parts.length !== 3) return new Date(dateStr);
-    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    if (!dateStr) return new Date();
+    // Support both YYYY-MM-DD and DD/MM/YYYY or similar if saved inconsistently
+    const parts = dateStr.includes('-') ? dateStr.split('-') : dateStr.split('/');
+
+    if (parts.length === 3) {
+        // Assume YYYY-MM-DD if first part is 4 digits
+        if (parts[0].length === 4) {
+            return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        } else if (parts[2].length === 4) {
+            // Assume DD/MM/YYYY or DD-MM-YYYY
+            return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+        } else {
+            return new Date(dateStr);
+        }
+    }
+    return new Date(dateStr);
 }
 
 /**
@@ -237,6 +250,51 @@ export function formatSafeDate(dateStr: string, options: Intl.DateTimeFormatOpti
     const date = parseLocalISOString(dateStr);
     return date.toLocaleDateString('es-ES', options);
 }
+
+/**
+ * Calculates the monthly quota needed for a goal.
+ * Uses startDate and targetDate for accurate period calculation.
+ * @param goal The Goal object
+ * @returns The monthly amount to save
+ */
+export function calculateGoalQuota(goal: any): number {
+    // 1. If there's a manual quota, priority goes there
+    if (goal.monthlyQuota && goal.monthlyQuota > 0) {
+        return goal.monthlyQuota;
+    }
+
+    // 2. Calculate based on startDate and targetDate (or legacy deadline)
+    const target = goal.targetDate || goal.deadline;
+    if (!goal.targetAmount || !target) {
+        return 0;
+    }
+
+    // Parse dates
+    const start = goal.startDate ? parseLocalISOString(goal.startDate) : new Date();
+    const targetDate = parseLocalISOString(target);
+
+    if (isNaN(targetDate.getTime()) || isNaN(start.getTime())) {
+        return 0;
+    }
+
+    const remainingAmount = Math.max(0, goal.targetAmount - (goal.currentAmount || 0));
+
+    if (remainingAmount <= 0) return 0;
+
+    // Calculate months between START and TARGET (INCLUSIVE)
+    // Example: Feb (month 1) → Mar (month 2) = 2 months, not 1
+    const yearsDiff = targetDate.getFullYear() - start.getFullYear();
+    const monthsDiff = (yearsDiff * 12) + (targetDate.getMonth() - start.getMonth()) + 1; // +1 for inclusive count
+
+    // If the period is 0 or negative, require full amount immediately
+    if (monthsDiff <= 0) {
+        return remainingAmount;
+    }
+
+    const quota = remainingAmount / monthsDiff;
+    return isNaN(quota) ? 0 : quota;
+}
+
 
 /**
  * Calculates smart reserve suggestion based on user configuration
