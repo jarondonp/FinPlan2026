@@ -156,22 +156,132 @@ export const PlanningModule = ({ onNavigate }: PlanningModuleProps) => {
         }, { total: 0, sources: [] as { name: string, amount: number }[] });
     }, [debtAccounts]);
 
-    // Simulation logic (Simpler version for chart)
-    const simulationData = useMemo(() => {
-        if (totalDebt === 0) return [];
-        let balance = totalDebt;
-        const history = [{ month: 0, balance }];
-        const monthlyRate = 0.20 / 12; // Avg 20% APR assumption for quick chart
+    // --- Advanced Simulation Logic ---
+    const simulationResult = useMemo(() => {
+        if (debtAccounts.length === 0) return null;
 
-        for (let i = 1; i <= 60; i++) {
-            const interest = balance * monthlyRate;
-            balance = Math.max(0, balance + interest - totalMonthlyCommitment);
-            history.push({ month: i, balance: Math.round(balance) });
-            if (balance <= 0) break;
+        const simulate = (withExtra: boolean) => {
+            // Deep copy accounts to track simulation state
+            let currentAccounts = debtAccounts.map(a => ({
+                id: a.id,
+                balance: Math.abs(a.dynamicBalance),
+                apr: a.apr || 0,
+                minPayment: a.minPayment || (Math.abs(a.dynamicBalance) * 0.02)
+            }));
+
+            let month = 0;
+            let totalInterestPaid = 0;
+            const history = [];
+            const MAX_MONTHS = 360; // Cap at 30 years to prevent infinite loops
+
+            while (month < MAX_MONTHS) {
+                const totalBalance = currentAccounts.reduce((sum, a) => sum + a.balance, 0);
+                history.push({ month, balance: totalBalance });
+
+                if (totalBalance < 1) break;
+
+                // 1. Accrue Interest
+                currentAccounts.forEach(a => {
+                    const monthlyRate = (a.apr / 100) / 12;
+                    const interest = a.balance * monthlyRate;
+                    a.balance += interest;
+                    totalInterestPaid += interest;
+                });
+
+                // 2. Calculate Allocation
+                // Total Available for this month
+                // For "Standard" (Min Only): effective extra = 0
+                // For "Accelerated" (With Extra): effective extra = extraPayment
+                // Note: As debts are paid off, their minimums become "available" in a Snowball/Avalanche flow?
+                // STRICTLY SPEAKING:
+                // - "Minimums Only" means you pay ONLY the minimum required by the bank for each active debt. If a debt dies, you STOP paying its minimum.
+                // - "Accelerated" means you keep your "Total Monthly Commitment" constant (Snowball effect).
+
+                if (!withExtra) {
+                    // Scenario A: Minimums Only (Pay min, release cash when done)
+                    currentAccounts.forEach(a => {
+                        const recMin = Math.max(a.minPayment, 5); // Assume at least $5
+                        const pay = Math.min(a.balance, recMin);
+                        a.balance -= pay;
+                    });
+                } else {
+                    // Scenario B: Accelerated (Constant Commitment)
+                    // We rely on the generic 'calculatePaymentPlan' logic conceptually, but simplified here for speed:
+                    // 1. Pay Mins
+                    // 2. Distribute Remainder (Snowball/Avalanche)
+
+                    // We use 'totalMonthlyCommitment' calculated outside (Mins + Extra)
+                    // But wait, 'totalMonthlyCommitment' is based on current active debts. 
+                    // In a simulation, we usually assume the User keeps paying $X/month consistently.
+
+                    let availableCash = totalMonthlyCommitment;
+
+                    // 1. Mandatory Minimums first
+                    currentAccounts.forEach(a => {
+                        if (a.balance > 0) {
+                            const recMin = Math.min(a.balance, Math.max(a.minPayment, 5));
+                            a.balance -= recMin;
+                            availableCash -= recMin;
+                        }
+                    });
+
+                    // 2. Avalanche/Snowball the rest
+                    if (availableCash > 0) {
+                        const targets = currentAccounts.filter(a => a.balance > 0);
+                        if (strategy === 'AVALANCHE') {
+                            targets.sort((a, b) => b.apr - a.apr);
+                        } else {
+                            targets.sort((a, b) => a.balance - b.balance);
+                        }
+
+                        for (const target of targets) {
+                            if (availableCash <= 0) break;
+                            const payment = Math.min(target.balance, availableCash);
+                            target.balance -= payment;
+                            availableCash -= payment;
+                        }
+                    }
+                }
+
+                // Cleanup paid debts
+                // We don't remove them to keep indices stable, but balance is 0
+                month++;
+            }
+
+            return { history, totalInterestPaid, months: month };
+        };
+
+        const standard = simulate(false);
+        const accelerated = simulate(true);
+
+        // Merge data for chart
+        const chartData = standard.history.map((pt, i) => {
+            const accPt = accelerated.history[i];
+            return {
+                month: pt.month,
+                Standard: pt.balance,
+                Accelerated: accPt ? accPt.balance : 0
+            };
+        });
+
+        // If Standard goes longer, fill Accelerated with 0
+        if (standard.history.length > accelerated.history.length) {
+            // Already handled by map above (accPt undefined -> 0)
         }
-        return history;
+        // If Accelerated goes longer (unlikely unless math is weird), clip? No, map covers standard length. 
+        // Usually Standard length >= Accelerated length.
 
-    }, [totalDebt, totalMonthlyCommitment]);
+        return {
+            chartData,
+            metrics: {
+                interestSaved: standard.totalInterestPaid - accelerated.totalInterestPaid,
+                timeSaved: standard.months - accelerated.months,
+                months: accelerated.months,
+                years: (accelerated.months / 12).toFixed(1)
+            }
+        };
+
+    }, [debtAccounts, extraPayment, strategy, totalMonthlyCommitment]);
 
 
     return (
@@ -252,42 +362,87 @@ export const PlanningModule = ({ onNavigate }: PlanningModuleProps) => {
                             )}
                         </div>
 
-                        <div className="space-y-4 pt-6 border-t border-slate-100">
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-500">Deuda Total</span>
-                                <span className="font-mono font-bold text-slate-800">{formatCurrency(totalDebt)}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-500">Tiempo Estimado</span>
-                                <span className="font-bold text-emerald-600 flex items-center gap-1">
-                                    <Calendar size={14} /> {simulationData.length} Meses
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+                        {/* Chart Section - Upgraded */}
+                        {simulationResult && (
+                            <div className="mt-8 pt-6 border-t border-slate-100">
+                                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <TrendingUp size={16} className="text-indigo-600" />
+                                    Libertad Financiera
+                                </h3>
 
-                    {/* Chart */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-64">
-                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Proyección</h3>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={simulationData}>
-                                <defs>
-                                    <linearGradient id="colorBal" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1} />
-                                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                <XAxis dataKey="month" hide />
-                                <YAxis hide />
-                                <Tooltip
-                                    contentStyle={{ background: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff' }}
-                                    formatter={(value: number) => formatCurrency(value)}
-                                    labelFormatter={(label) => `Mes ${label}`}
-                                />
-                                <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorBal)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                                {/* Metrics Badges */}
+                                <div className="grid grid-cols-2 gap-3 mb-4">
+                                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                                        <div className="text-[10px] text-emerald-600 font-bold uppercase">Ahorro Interés</div>
+                                        <div className="text-lg font-bold text-emerald-700">{formatCurrency(simulationResult.metrics.interestSaved)}</div>
+                                    </div>
+                                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                                        <div className="text-[10px] text-indigo-600 font-bold uppercase">Tiempo Ganado</div>
+                                        <div className="text-lg font-bold text-indigo-700">{simulationResult.metrics.timeSaved} Meses</div>
+                                    </div>
+                                </div>
+
+                                <div className="h-48 w-full relative">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={simulationResult.chartData}>
+                                            <defs>
+                                                <linearGradient id="colorStd" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.1} />
+                                                    <stop offset="95%" stopColor="#94a3b8" stopOpacity={0} />
+                                                </linearGradient>
+                                                <linearGradient id="colorAcc" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="month" hide />
+                                            <YAxis hide />
+                                            <Tooltip
+                                                contentStyle={{ background: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
+                                                formatter={(value: number, name: string) => [formatCurrency(value), name === 'Standard' ? 'Solo Mínimos' : 'Tu Plan']}
+                                                labelFormatter={(label) => `Mes ${label}`}
+                                            />
+                                            {/* Standard Path (Grey) */}
+                                            <Area
+                                                type="monotone"
+                                                dataKey="Standard"
+                                                stroke="#94a3b8"
+                                                strokeWidth={2}
+                                                strokeDasharray="4 4"
+                                                fillOpacity={1}
+                                                fill="url(#colorStd)"
+                                            />
+                                            {/* Accelerated Path (Green/Indigo) */}
+                                            <Area
+                                                type="monotone"
+                                                dataKey="Accelerated"
+                                                stroke="#10b981"
+                                                strokeWidth={3}
+                                                fillOpacity={1}
+                                                fill="url(#colorAcc)"
+                                            />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+
+                                    {/* Overlay Labels */}
+                                    <div className="absolute top-2 right-2 flex flex-col items-end gap-1 text-[10px]">
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                            <span className="font-bold text-slate-600">Plan Acelerado ({simulationResult.metrics.years} años)</span>
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-60">
+                                            <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                                            <span className="text-slate-500">Solo Mínimos</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-center text-xs text-slate-400 mt-2">
+                                    Proyección estimada asumiendo tasas e interés constante.
+                                </p>
+                            </div>
+                        )}
+
                     </div>
                 </div>
 
