@@ -41,9 +41,10 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
     const { data: allRecurring } = useFirestore<RecurringExpense>('recurringExpenses');
     const recurringExpenses = (allRecurring || []).filter(r => r.scope === scope || (scope === 'PERSONAL' && !r.scope));
 
-    const { urgentCount, reserveRequired } = React.useMemo(() => {
+    const { urgentCount, reserveRequired, urgentItems } = React.useMemo(() => {
         let count = 0;
         let reserve = 0;
+        const items: RecurringExpense[] = [];
         const today = new Date().toISOString().split('T')[0];
 
         recurringExpenses.forEach(exp => {
@@ -51,7 +52,10 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
             const days = daysBetween(today, exp.nextDueDate || '');
 
             // Urgency Badge Counter (Overdue or < 30 days)
-            if (days < 30) count++;
+            if (days < 30) {
+                count++;
+                items.push(exp);
+            }
 
             // Smart Reserve Calculation
             if (exp.frequency !== 'MONTHLY' && days >= 0) {
@@ -59,7 +63,11 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                 reserve += exp.amount / monthsDisp;
             }
         });
-        return { urgentCount: count, reserveRequired: reserve };
+
+        // Sort items by due date (ascending)
+        items.sort((a, b) => new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime());
+
+        return { urgentCount: count, reserveRequired: reserve, urgentItems: items };
     }, [recurringExpenses]);
 
     const loadDemoData = async () => {
@@ -95,6 +103,7 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
                     active={currentView === "settings"}
                     onClick={() => onNavigate("settings")}
                     badge={urgentCount > 0 ? urgentCount : undefined}
+                    alertItems={urgentItems}
                 />
             </nav>
 
@@ -157,24 +166,56 @@ export const Sidebar = ({ currentView, onNavigate }: SidebarProps) => {
     );
 };
 
-const NavItem = ({ icon, label, active, onClick, badge }: any) => (
-    <button
-        onClick={onClick}
-        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${active
-            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20"
-            : "hover:bg-slate-800 hover:text-white"
-            }`}
-    >
-        {icon}
-        <span>{label}</span>
-        {badge && (
-            <span className="ml-auto bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border border-rose-400 shadow-sm animate-pulse">
-                {badge}
-            </span>
-        )}
-        {!badge && active && <ChevronRight size={14} className="ml-auto opacity-50" />}
-    </button>
-);
+const NavItem = ({ icon, label, active, onClick, badge, alertItems }: any) => {
+    const [showPopover, setShowPopover] = React.useState(false);
+
+    return (
+        <div className="relative" onMouseEnter={() => setShowPopover(true)} onMouseLeave={() => setShowPopover(false)}>
+            <button
+                onClick={onClick}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${active
+                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20"
+                    : "hover:bg-slate-800 hover:text-white"
+                    }`}
+            >
+                {icon}
+                <span>{label}</span>
+                {badge && (
+                    <span className="ml-auto bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border border-rose-400 shadow-sm animate-pulse">
+                        {badge}
+                    </span>
+                )}
+                {!badge && active && <ChevronRight size={14} className="ml-auto opacity-50" />}
+            </button>
+
+            {/* Smart Popover for Alerts */}
+            {showPopover && alertItems && alertItems.length > 0 && (
+                <div className="absolute left-full top-0 ml-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-in fade-in slide-in-from-left-2">
+                    <div className="bg-rose-50 p-3 border-b border-rose-100 flex justify-between items-center">
+                        <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">Por Vencer ({alertItems.length})</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto divide-y divide-slate-50 scrollbar-thin scrollbar-thumb-slate-200">
+                        {alertItems.map((item: any) => (
+                            <div key={item.id} className="p-3 hover:bg-slate-50 transition-colors">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="text-xs font-bold text-slate-700">{item.name}</span>
+                                    <span className="text-xs font-mono font-bold text-slate-900">{formatCurrency(item.amount)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-[10px] text-slate-500">
+                                    <span>{item.nextDueDate}</span>
+                                    <span className="text-rose-500 font-bold bg-rose-50 px-1.5 rounded">{daysBetween(new Date().toISOString().split('T')[0], item.nextDueDate) < 0 ? 'Vencido' : 'Urgente'}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-slate-50 p-2 text-center border-t border-slate-100">
+                        <span className="text-[10px] text-indigo-600 font-bold cursor-pointer hover:underline">Ir a Configuración →</span>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 const ScopeToggle = () => {
     const { scope, setScope } = useScope();

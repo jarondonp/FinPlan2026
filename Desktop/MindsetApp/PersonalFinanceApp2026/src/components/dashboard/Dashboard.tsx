@@ -1,19 +1,20 @@
 import React, { useMemo, useState, useEffect } from 'react';
 // import { useLiveQuery } from 'dexie-react-hooks'; // Removed for Firestore
 // import { db } from '../../db/db'; // Removed for Firestore
+import { db } from '../../firebase/config'; // Import Firebase Instance
+import { doc, updateDoc } from 'firebase/firestore'; // Import write functions
 import { useFirestore } from '../../hooks/useFirestore';
 import { formatCurrency } from '../../utils';
 import { useGlobalFilter, useScope } from '../../context/GlobalFilterContext';
 import {
     PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight, AlertTriangle, ChevronDown, ChevronUp, Briefcase, Activity, CreditCard, ChevronRight, Check } from 'lucide-react';
 import { MonthStatusBadge } from '../closing/MonthStatusBadge';
 import { AiInsightWidget } from './AiInsightWidget';
 import { useAccountBalance } from '../../hooks/useAccountBalance';
-import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel } from '../../utils/subscriptionHelpers';
+import { calculateSmartReserve, daysBetween, getUrgencyBadge, getFrequencyLabel, calculateNextDueDate } from '../../utils/subscriptionHelpers';
 import { RecurringExpense } from '../../types';
-import { BackupManager } from '../settings/BackupManager';
 
 interface DashboardProps {
     onNavigate: (view: string) => void;
@@ -162,33 +163,132 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         return { critical, upcomingNonMonthly };
     }, [recurringExpenses]);
 
+    // --- Mark as Paid Logic ---
+    const [processingId, setProcessingId] = useState<string | null>(null);
+    const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
+
+    const handleMarkAsPaid = async (e: React.MouseEvent, expense: RecurringExpense) => {
+        e.stopPropagation();
+        if (!expense.nextDueDate) return;
+
+        setProcessingId(expense.id);
+        try {
+            // Calculate NEXT date
+            const nextDate = calculateNextDueDate(expense.nextDueDate, expense.frequency);
+
+            // Allow time for animation feel
+            await new Promise(r => setTimeout(r, 500));
+
+            // Update in Firestore
+            const ref = doc(db, 'recurringExpenses', expense.id);
+            await updateDoc(ref, {
+                nextDueDate: nextDate
+            });
+
+            // No need to create transaction as per user request (cleaner flow)
+        } catch (error) {
+            console.error("Error updating expense", error);
+            alert("Error al actualizar la fecha.");
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
     return (
         <div className={`p-8 max-w-7xl mx-auto animate-in fade-in duration-500 ${scope === 'BUSINESS' ? 'bg-slate-50/50 min-h-screen' : ''}`}>
-            <BackupManager />
             <h1 className="text-3xl font-bold text-slate-900 mb-8 flex items-center gap-3">
                 Dashboard
                 {scope === 'BUSINESS' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full uppercase tracking-wider border border-blue-200">Empresa</span>}
                 <MonthStatusBadge />
             </h1>
 
-            {/* Critical Subscription Banner */}
+            {/* ACTIONABLE ALERT CENTER (New Design) */}
             {subscriptionAlerts.critical.length > 0 && (
-                <div className="mb-6 bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-center justify-between shadow-sm animate-in slide-in-from-top-2">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                            <AlertTriangle size={24} />
+                <div className="mb-8 animate-in slide-in-from-top-2">
+                    {/* Header Bar (Accordion Trigger) */}
+                    <div
+                        onClick={() => setIsAlertsExpanded(!isAlertsExpanded)}
+                        className={`
+                            cursor-pointer rounded-xl border shadow-sm transition-all duration-300 overflow-hidden
+                            ${isAlertsExpanded ? 'bg-white ring-2 ring-rose-100 border-rose-200' : 'bg-rose-50 border-rose-200 hover:bg-rose-100'}
+                        `}
+                    >
+                        <div className="p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg transition-colors ${isAlertsExpanded ? 'bg-rose-100 text-rose-600' : 'bg-rose-200 text-rose-700'}`}>
+                                    <AlertTriangle size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-rose-800 text-base">
+                                        Tienes {subscriptionAlerts.critical.length} pagos prioritarios
+                                    </h3>
+                                    <p className="text-xs text-rose-600 font-medium">
+                                        {isAlertsExpanded ? 'Revisa y gestiona cada pago individualmente:' : 'Haz clic para ver la lista y marcar como pagados.'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className={`text-rose-400 transition-transform duration-300 ${isAlertsExpanded ? 'rotate-180' : ''}`}>
+                                <ChevronDown size={20} />
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-bold text-rose-800">Tienes {subscriptionAlerts.critical.length} pagos urgentes o vencidos</h3>
-                            <p className="text-xs text-rose-600">Revisa tus suscripciones para evitar cortes o recargos.</p>
+
+                        {/* Collapsible Content */}
+                        <div className={`
+                            transition-[max-height,opacity] duration-300 ease-in-out
+                            ${isAlertsExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}
+                        `}>
+                            <div className="border-t border-rose-100 bg-white">
+                                <div className="divide-y divide-slate-100">
+                                    {subscriptionAlerts.critical.map((item) => (
+                                        <div key={item.exp.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors group">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-lg shadow-sm border border-slate-200">
+                                                    {item.exp.icon || '📄'}
+                                                </div>
+                                                <div>
+                                                    <div className="font-bold text-slate-800">{item.exp.name}</div>
+                                                    <div className="flex items-center gap-2 text-xs">
+                                                        <span className="font-mono font-medium text-slate-600">{formatCurrency(item.exp.amount)}</span>
+                                                        <span className="text-slate-300">•</span>
+                                                        <span className={`${item.days < 0 ? 'text-rose-600 font-bold' : 'text-amber-600 font-medium'}`}>
+                                                            {item.days < 0 ? `Venció hace ${Math.abs(item.days)} días` : `Vence en ${item.days} días`}
+                                                        </span>
+                                                        <span className="text-slate-400">({item.exp.nextDueDate})</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                onClick={(e) => handleMarkAsPaid(e, item.exp)}
+                                                disabled={processingId === item.exp.id}
+                                                className={`
+                                                    px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all
+                                                    ${processingId === item.exp.id
+                                                        ? 'bg-emerald-100 text-emerald-700 cursor-wait'
+                                                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 shadow-sm'}
+                                                `}
+                                            >
+                                                {processingId === item.exp.id ? (
+                                                    <>
+                                                        <div className="animate-spin rounded-full h-3 w-3 border-2 border-emerald-600 border-t-transparent"></div>
+                                                        Actualizando...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Check size={14} className="group-hover:scale-110 transition-transform" />
+                                                        Marcar Pagado
+                                                    </>
+                                                )}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-2 bg-slate-50 text-center text-[10px] text-slate-400 border-t border-slate-100">
+                                    Nota: "Marcar Pagado" solo actualiza la fecha de vencimiento. No afecta tu saldo.
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <button
-                        onClick={() => onNavigate('settings:recurring')}
-                        className="px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 transition-colors"
-                    >
-                        Ver Pagos
-                    </button>
                 </div>
             )}
 
