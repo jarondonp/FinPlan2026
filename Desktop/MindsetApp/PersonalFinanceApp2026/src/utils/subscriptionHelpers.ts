@@ -96,16 +96,18 @@ export function getUrgencyBadge(daysUntil: number): UrgencyBadge {
     };
 }
 
+// Enhanced Smart Reserve Result
 export interface SmartReserveResult {
     vencidos: RecurringExpense[];
     urgentes: RecurringExpense[];
-    proximos: RecurringExpense[];
-    planeables: RecurringExpense[];
+    proximos: RecurringExpense[]; // Active Reserves
+    pendientes: { exp: RecurringExpense; startDate: string }[]; // Future Reserves
+    planeables: RecurringExpense[]; // Generic bucket (fallback)
     reservaTotal: number;
 }
 
 /**
- * Calcula reserva mensual inteligente basada en tiempo disponible
+ * Calcula reserva mensual inteligente basada en tiempo disponible y configuración de inicio
  */
 export function calculateSmartReserve(
     expenses: RecurringExpense[],
@@ -115,6 +117,7 @@ export function calculateSmartReserve(
         vencidos: [],
         urgentes: [],
         proximos: [],
+        pendientes: [], // New: Reserves that haven't started yet
         planeables: [],
         reservaTotal: 0
     };
@@ -126,25 +129,45 @@ export function calculateSmartReserve(
         .forEach(exp => {
             const diasHasta = daysBetween(todayStr, exp.nextDueDate);
 
+            // 1. Check if it's already due or urgent (Override functionality)
             if (diasHasta < 0) {
-                // VENCIDO: Alerta roja
                 results.vencidos.push(exp);
-            }
-            else if (diasHasta <= 30) {
-                // URGENTE: Alerta naranja, no calcular reserva
+                return;
+            } else if (diasHasta <= 30) {
                 results.urgentes.push(exp);
+                return;
             }
-            else if (diasHasta <= 60) {
-                // PRÓXIMO: Badge amarillo, calcular reserva
+
+            // 2. Planning Logic (Check configured start Date)
+            const reservationConfig = exp.reservation; // Assuming this exists on RecurringExpense
+            const startDate = reservationConfig?.startDate ? new Date(reservationConfig.startDate) : null;
+
+            // If we have a start date and it's in the future
+            if (startDate && startDate > today) {
+                results.pendientes.push({ exp, startDate: startDate.toISOString().split('T')[0] });
+                // We do NOT add to reservaTotal
+                return;
+            }
+
+            // 3. Active Reserve Calculation (It's time to save!)
+            // Logic: Target / Remaining Months
+            const targetAmount = reservationConfig?.targetAmount || exp.amount;
+            const initialSaved = reservationConfig?.initialSaved || 0;
+            const monthsRemaining = Math.max(1, Math.floor(diasHasta / 30));
+
+            // Only calculate if months > 0
+            if (monthsRemaining > 0) {
+                const monthlyQuota = (targetAmount - initialSaved) / monthsRemaining;
+
+                // Add to active list with calculated quota attached (we might want to change the type or extend RecurringExpense temporarily)
+                // For now, attaching quota to the expense object purely for display is risky if not typed, 
+                // but we will use the same logic in display.
+
+                // We push to 'proximos' which now implies "Active Reserve"
+                // Ideally we'd return a rich object, but keeping compatible with existing structure for now.
+                // We add a dynamic property or handle it in the UI.
                 results.proximos.push(exp);
-                const mesesDisp = Math.max(1, Math.floor(diasHasta / 30));
-                results.reservaTotal += exp.amount / mesesDisp;
-            }
-            else {
-                // PLANEABLE: Badge verde, calcular reserva
-                results.planeables.push(exp);
-                const mesesDisp = Math.floor(diasHasta / 30);
-                results.reservaTotal += exp.amount / mesesDisp;
+                results.reservaTotal += monthlyQuota;
             }
         });
 

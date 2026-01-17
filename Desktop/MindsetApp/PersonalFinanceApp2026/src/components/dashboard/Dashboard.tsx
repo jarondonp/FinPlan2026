@@ -138,29 +138,44 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
 
     // --- Subscription Alerts Logic ---
     const subscriptionAlerts = useMemo(() => {
-        const today = new Date().toISOString().split('T')[0];
-        const critical: { exp: RecurringExpense, days: number }[] = [];
-        const upcomingNonMonthly: { exp: RecurringExpense, days: number, reserve: number }[] = [];
+        // Use the CENTRALIZED smart calculation
+        const result = calculateSmartReserve(recurringExpenses);
 
-        recurringExpenses.forEach(exp => {
-            if (!exp.active) return;
-            const days = daysBetween(today, exp.nextDueDate || '');
+        // Map 'critical' (Overdue + Urgent)
+        const critical = [...result.vencidos, ...result.urgentes].map(exp => ({
+            exp,
+            days: daysBetween(new Date().toISOString().split('T')[0], exp.nextDueDate)
+        }));
 
-            // Critical Alerts (Overdue or Urgent < 30 days) of ANY frequency
-            if (days < 30) {
-                critical.push({ exp, days });
-            }
+        // Map 'upcomingNonMonthly' (Active + Pending)
+        const activeReserves = result.proximos.map(exp => {
+            const days = daysBetween(new Date().toISOString().split('T')[0], exp.nextDueDate);
+            const monthsDisp = Math.max(1, Math.floor(days / 30));
+            // Recalculate quota locally or rely on helper
+            const target = exp.reservation?.targetAmount || exp.amount;
+            const saved = exp.reservation?.initialSaved || 0;
+            const reserve = (target - saved) / monthsDisp;
 
-            // Upcoming Annual/Non-Monthly (Show if > 0 days and it is not monthly)
-            // We want to highlight these for planning reserves
-            if (exp.frequency !== 'MONTHLY' && days >= 0) {
-                const monthsDisp = Math.max(1, Math.floor(days / 30));
-                const reserve = exp.amount / monthsDisp;
-                upcomingNonMonthly.push({ exp, days, reserve });
-            }
+            return { exp, days, reserve, status: 'ACTIVE' };
         });
 
-        return { critical, upcomingNonMonthly };
+        const pendingReserves = result.pendientes.map(item => {
+            const days = daysBetween(new Date().toISOString().split('T')[0], item.exp.nextDueDate);
+            return {
+                exp: item.exp,
+                days,
+                reserve: 0,
+                status: 'PENDING',
+                startDate: item.startDate
+            };
+        });
+
+        // Combine and sort by due date
+        const allUpcoming = [...activeReserves, ...pendingReserves].sort((a, b) => {
+            return new Date(a.exp.nextDueDate).getTime() - new Date(b.exp.nextDueDate).getTime();
+        });
+
+        return { critical, upcomingNonMonthly: allUpcoming };
     }, [recurringExpenses]);
 
     // --- Mark as Paid Logic ---
@@ -521,7 +536,14 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                                     {subscriptionAlerts.upcomingNonMonthly.map((item, idx) => (
                                         <div key={idx} className="flex justify-between items-center p-3 rounded-lg hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
                                             <div>
-                                                <div className="font-bold text-slate-800 text-sm">{item.exp.name}</div>
+                                                <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                                    {item.exp.name}
+                                                    {item.status === 'PENDING' && (
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold border border-slate-200">
+                                                            Pausado
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <div className="flex items-center gap-2 text-xs text-slate-500">
                                                     <span>{getFrequencyLabel(item.exp.frequency)}</span>
                                                     <span className={`${item.days <= 60 ? 'text-amber-600 font-medium' : ''}`}>
@@ -530,8 +552,23 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
                                                 </div>
                                             </div>
                                             <div className="text-right">
-                                                <div className="font-mono font-bold text-indigo-600">{formatCurrency(item.reserve)}/mes</div>
-                                                <div className="text-[10px] text-slate-400">Total: {formatCurrency(item.exp.amount)}</div>
+                                                {item.status === 'ACTIVE' ? (
+                                                    // Active Reserve Display
+                                                    <>
+                                                        <div className="font-mono font-bold text-indigo-600">{formatCurrency(item.reserve)}/mes</div>
+                                                        <div className="text-[10px] text-slate-400">Total: {formatCurrency(item.exp.amount)}</div>
+                                                    </>
+                                                ) : (
+                                                    // Pending Reserve Display (Show Start Date)
+                                                    <>
+                                                        <div className="flex flex-col items-end">
+                                                            <div className="text-[10px] font-bold text-slate-500 mb-0.5">Inicia en</div>
+                                                            <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded">
+                                                                {item.startDate ? new Date(item.startDate).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }).replace('.', '').toUpperCase() : 'N/A'}
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -591,3 +628,4 @@ export const Dashboard = ({ onNavigate }: DashboardProps) => {
         </div>
     );
 };
+
