@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, History, TrendingUp, TrendingDown, Clock } from 'lucide-react';
+import { X, History, TrendingUp, TrendingDown, Clock, Trash2 } from 'lucide-react';
 import { BudgetEditHistory } from '../../types/budgetEditHistory';
 import { BudgetEditHistoryService } from '../../services/BudgetEditHistoryService';
 import { formatCurrency } from '../../utils';
@@ -39,6 +39,27 @@ export const EditHistoryModal: React.FC<EditHistoryModalProps> = ({
         }
     };
 
+    const handleClearHistory = async () => {
+        if (!confirm('¿Estás seguro de borrar TODO el historial de este mes? Esta acción no se puede deshacer.')) return;
+
+        try {
+            setLoading(true);
+            const { deleteDoc, doc } = await import('firebase/firestore');
+            const { db } = await import('../../firebase/config');
+
+            // Delete all currently loaded history entries
+            await Promise.all(history.map(entry => deleteDoc(doc(db, 'users', userId, 'budget_edit_history', entry.id))));
+
+            setHistory([]);
+            alert('Historial borrado exitosamente.');
+        } catch (error) {
+            console.error('Error clearing history:', error);
+            alert('Error al borrar el historial');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const formatDate = (timestamp: any) => {
         const date = timestamp.toDate();
         const options: Intl.DateTimeFormatOptions = {
@@ -69,12 +90,24 @@ export const EditHistoryModal: React.FC<EditHistoryModalProps> = ({
                             </p>
                         </div>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                    >
-                        <X size={20} />
-                    </button>
+                    <div className="flex gap-2">
+                        {history.length > 0 && (
+                            <button
+                                onClick={handleClearHistory}
+                                className="p-2 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold"
+                                title="Borrar todo el historial"
+                            >
+                                <span className="hidden sm:inline">Limpiar</span>
+                                <Trash2 size={20} />
+                            </button>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}

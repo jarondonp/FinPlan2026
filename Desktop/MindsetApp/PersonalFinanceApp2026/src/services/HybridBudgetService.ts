@@ -128,6 +128,41 @@ export const hybridBudgetService = {
         } catch (error) {
             console.error("Error calculating debt service for budget:", error);
         }
+
+        // --- NEW: INJECT WEALTH GOALS CATEGORY ---
+        try {
+            const goalsSnap = await getDocs(collection(db, 'users', user.uid, 'goals'));
+            const goals = goalsSnap.docs
+                .map(d => d.data() as Goal)
+                .filter(g => isInScope(g.scope));
+
+            if (goals.length > 0) {
+                // Calculate Total Monthly Quota
+                const totalQuota = goals.reduce((sum, g) => sum + calculateGoalQuota(g), 0);
+
+                const goalsCategoryName = "Metas de Patrimonio";
+                breakdown.set(goalsCategoryName, {
+                    category: goalsCategoryName,
+                    fixed: totalQuota, // Monthly Quota is a FIXED commitment
+                    reserved: 0,
+                    variable: 0,
+                    totalLimit: totalQuota,
+                    spent: totalQuota, // Assume paid if quota exists (or track transfers?)
+                    details: {
+                        fixed: goals.map(g => ({
+                            id: g.id,
+                            name: `Cuota: ${g.name}`,
+                            amount: calculateGoalQuota(g),
+                            notice: `Meta: ${g.targetAmount}`
+                        })).filter(i => i.amount > 0),
+                        reserved: [],
+                        variable: []
+                    }
+                });
+            }
+        } catch (error) {
+            console.error("Error calculating wealth goals for budget:", error);
+        }
         // -----------------------------------------
 
         // 2. Fetch ALL Recurring Expenses (filtering in memory)
@@ -411,5 +446,157 @@ export const hybridBudgetService = {
         });
 
         return total;
+    },
+
+    /**
+     * Calculates the "Planned" or "Base" budget for a given month.
+     * This represents what SHOULD be spent based on configuration (Recurring, Goals, Debt, Category Limits).
+     * It ignores actual spending and manual variable adjustments unless they are part of the 'plan' (e.g. Budget Limits).
+     */
+    async calculatePlannedBudget(month: Date, scope: Scope): Promise<CategoryBudgetBreakdown[]> {
+        const user = auth.currentUser;
+        if (!user) return [];
+
+        const breakdown = new Map<string, CategoryBudgetBreakdown>();
+
+        // Helper to check scope
+        const isInScope = (itemScope?: string) => {
+            if (scope === 'PERSONAL') return !itemScope || itemScope === 'PERSONAL';
+            return itemScope === scope;
+        };
+
+        // 1. Fetch Categories to get "Budget Limits" (Planned Variable)
+        const categoriesSnap = await getDocs(collection(db, 'users', user.uid, 'categories'));
+        categoriesSnap.docs
+            .map(d => d.data() as CategoryDef)
+            .filter(cat => isInScope(cat.scope))
+            .forEach(cat => {
+                breakdown.set(cat.name, {
+                    category: cat.name,
+                    fixed: 0,
+                    reserved: 0,
+                    variable: cat.budgetLimit || 0, // USE THE DEFINED LIMIT AS PLANNED VARIABLE
+                    totalLimit: cat.budgetLimit || 0,
+                    spent: 0,
+                    details: {
+                        fixed: [],
+                        reserved: [],
+                        variable: cat.budgetLimit ? [{ id: 'plan_limit', name: 'Límite Planificado', amount: cat.budgetLimit }] : []
+                    }
+                });
+            });
+
+        // 2. Add Planned Recurring & Reserves
+        // We reuse logic similar to getBudgetBreakdown but strictly for "what should be"
+        const recurringSnap = await getDocs(collection(db, 'users', user.uid, 'recurringExpenses'));
+        const recurring = recurringSnap.docs
+            .map(d => d.data() as RecurringExpense)
+            .filter(r => isInScope(r.scope) && r.active); // Only active ones
+
+        recurring.forEach(r => {
+            if (!breakdown.has(r.category)) return;
+            const entry = breakdown.get(r.category)!;
+
+            // Logic simplified for "Plan": If it's active, it's in the plan.
+            // For Smart Reserves, we calculate the ideal quota.
+            if (r.reservation?.isEnabled) {
+                // Simplification: In a Plan view, we show the calculated quota
+                // We could duplicate the logic from getBudgetBreakdown for exact quota calculation
+                // For now, let's use the same calculation to be consistent
+                const target = r.reservation.targetAmount || r.amount;
+                const saved = r.reservation.initialSaved || 0;
+                const startDate = new Date(r.reservation.startDate + 'T00:00:00');
+                const nextDueDate = new Date(r.nextDueDate + 'T00:00:00');
+                const currentBudgetMonth = new Date(month.getFullYear(), month.getMonth(), 1);
+
+                // Only if in active range
+                if (currentBudgetMonth >= new Date(startDate.getFullYear(), startDate.getMonth(), 1)) {
+                    const diffTime = nextDueDate.getTime() - currentBudgetMonth.getTime();
+                    let monthsRemaining = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30)));
+                    if (diffTime <= 0) monthsRemaining = 1;
+                    const monthlyQuota = (target - saved) / monthsRemaining;
+
+                    entry.reserved += monthlyQuota;
+                    entry.details.reserved.push({ id: r.id, name: r.name, amount: monthlyQuota });
+                }
+            } else {
+                // Fixed
+                entry.fixed += r.amount;
+                entry.details.fixed.push({ id: r.id, name: r.name, amount: r.amount });
+            }
+            entry.totalLimit = entry.fixed + entry.reserved + entry.variable;
+        });
+
+        // 3. Add Planned Debt (Minimums + Extra Plan)
+        try {
+            const [accountsSnap, debtSettings] = await Promise.all([
+                getDocs(collection(db, 'users', user.uid, 'accounts')),
+                debtService.getDebtSettings(user.uid)
+            ]);
+
+            const debtAccounts = accountsSnap.docs
+                .map(d => d.data() as Account)
+                .filter(a => (a.type === 'Credit Card' || a.type === 'Loan') && Math.abs(a.balance) > 1);
+
+            if (debtAccounts.length > 0) {
+                const totalMin = debtAccounts.reduce((sum, a) => sum + (a.minPayment || Math.abs(a.balance) * 0.02), 0);
+                const totalDebtService = totalMin + debtSettings.extraPayment;
+
+                const debtCategoryName = "Servicio de Deuda";
+                breakdown.set(debtCategoryName, {
+                    category: debtCategoryName,
+                    fixed: totalDebtService,
+                    reserved: 0,
+                    variable: 0,
+                    totalLimit: totalDebtService,
+                    spent: 0,
+                    details: {
+                        fixed: [{ id: 'plan_debt', name: 'Plan de Deuda (Min + Extra)', amount: totalDebtService }],
+                        reserved: [],
+                        variable: []
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Error calculating planned debt", e);
+        }
+
+        // 4. Add Planned Goals
+        try {
+            const goalsSnap = await getDocs(collection(db, 'users', user.uid, 'goals'));
+            const goals = goalsSnap.docs
+                .map(d => d.data() as Goal)
+                .filter(g => isInScope(g.scope));
+
+            // Similar filter logic
+            const activeGoals = goals.filter(g => {
+                if (!g.startDate) return true;
+                const goalStart = new Date(g.startDate + 'T00:00:00');
+                const currentBudgetMonth = new Date(month.getFullYear(), month.getMonth(), 1);
+                return goalStart <= currentBudgetMonth;
+            });
+
+            if (activeGoals.length > 0) {
+                const totalQuota = activeGoals.reduce((sum, g) => sum + calculateGoalQuota(g), 0);
+                const goalsCategoryName = "Metas de Patrimonio";
+                breakdown.set(goalsCategoryName, {
+                    category: goalsCategoryName,
+                    fixed: totalQuota,
+                    reserved: 0,
+                    variable: 0,
+                    totalLimit: totalQuota,
+                    spent: 0,
+                    details: {
+                        fixed: [],
+                        reserved: activeGoals.map(g => ({ id: g.id, name: `Plan: ${g.name}`, amount: calculateGoalQuota(g) })).filter(i => i.amount > 0),
+                        variable: []
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Error calculating planned goals", e);
+        }
+
+        return Array.from(breakdown.values()).sort((a, b) => b.totalLimit - a.totalLimit);
     }
 };

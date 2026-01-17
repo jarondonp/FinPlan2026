@@ -126,6 +126,53 @@ export const BudgetCategoryRow: React.FC<BudgetCategoryRowProps> = ({
                                     ))
                                 )}
                             </div>
+
+                            {/* --- VARIABLE / EXTRAS SECTION --- */}
+                            <div className="mt-3 border-t border-indigo-100 pt-2">
+                                <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                    <TrendingUp size={12} /> Extras / Ajustes
+                                </h5>
+
+                                {/* Variable Items List */}
+                                <div className="space-y-1 mb-2">
+                                    {(cat.details?.variable || []).length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">Sin ajustes extras</p>
+                                    ) : (
+                                        (cat.details?.variable || []).map((item: any) => (
+                                            <div key={item.id} className="flex justify-between items-center text-xs p-2 bg-indigo-50 rounded border border-indigo-100">
+                                                <span className="text-slate-700">{item.name}</span>
+                                                <div className="text-right font-mono font-bold text-emerald-600">
+                                                    {formatCurrency(item.amount)}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Editor Actions */}
+                                {editingCategory && editingCategory.category === cat.category ? (
+                                    <InlineItemEditor
+                                        category={cat.category}
+                                        budgetType="variable"
+                                        initialItems={cat.details?.variable || []}
+                                        onSave={onSaveItems}
+                                        onCancel={onCancelEdit}
+                                    />
+                                ) : !isMonthClosed && (
+                                    <div className="flex justify-between items-center bg-white p-2 rounded border border-indigo-200">
+                                        <div className="text-xs">
+                                            <span className="font-bold text-slate-500 uppercase mr-2">Total Extras:</span>
+                                            <span className="font-mono font-bold text-indigo-700">{formatCurrency(cat.variable)}</span>
+                                        </div>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onStartEdit('variable'); }}
+                                            className="px-3 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-300 transition-colors flex items-center gap-1"
+                                        >
+                                            ✏️ Editar Extras
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     ) : cat.category === "Servicio de Deuda" ? (
                         /* Special categories: Servicio de Deuda */
@@ -154,6 +201,53 @@ export const BudgetCategoryRow: React.FC<BudgetCategoryRowProps> = ({
                                         ))
                                     );
                                 })()}
+                            </div>
+
+                            {/* --- VARIABLE / EXTRAS SECTION --- */}
+                            <div className="mt-3 border-t border-rose-100 pt-2">
+                                <h5 className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                    <TrendingUp size={12} /> Abonos Extra / Ajustes
+                                </h5>
+
+                                {/* Variable Items List */}
+                                <div className="space-y-1 mb-2">
+                                    {(cat.details?.variable || []).length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">Sin abonos extras manuales</p>
+                                    ) : (
+                                        (cat.details?.variable || []).map((item: any) => (
+                                            <div key={item.id} className="flex justify-between items-center text-xs p-2 bg-rose-50 rounded border border-rose-100">
+                                                <span className="text-slate-700">{item.name}</span>
+                                                <div className="text-right font-mono font-bold text-emerald-600">
+                                                    {formatCurrency(item.amount)}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                {/* Editor Actions */}
+                                {editingCategory && editingCategory.category === cat.category ? (
+                                    <InlineItemEditor
+                                        category={cat.category}
+                                        budgetType="variable"
+                                        initialItems={cat.details?.variable || []}
+                                        onSave={onSaveItems}
+                                        onCancel={onCancelEdit}
+                                    />
+                                ) : !isMonthClosed && (
+                                    <div className="flex justify-between items-center bg-white p-2 rounded border border-rose-200">
+                                        <div className="text-xs">
+                                            <span className="font-bold text-slate-500 uppercase mr-2">Total Extras:</span>
+                                            <span className="font-mono font-bold text-rose-700">{formatCurrency(cat.variable)}</span>
+                                        </div>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onStartEdit('variable'); }}
+                                            className="px-3 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-300 transition-colors flex items-center gap-1"
+                                        >
+                                            ✏️ Editar Extras
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : (

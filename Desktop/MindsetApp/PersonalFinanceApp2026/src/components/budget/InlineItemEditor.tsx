@@ -42,8 +42,8 @@ export const InlineItemEditor: React.FC<InlineItemEditorProps> = ({
     };
 
     const handleSave = async () => {
-        // Validate: all items must have name and amount > 0
-        const validItems = items.filter(item => item.name.trim() && item.amount > 0);
+        // Validate: all items must have name and non-zero amount (negatives allowed)
+        const validItems = items.filter(item => item.name.trim() && item.amount !== 0);
 
         // Allow saving empty list (to clear budget)
         // Only block if user has items but they are invalid (e.g. empty names)
@@ -102,7 +102,7 @@ export const InlineItemEditor: React.FC<InlineItemEditorProps> = ({
                                     className="w-24 px-2 py-1 text-sm border border-slate-300 rounded focus:outline-none focus:border-emerald-500"
                                     value={item.amount || ''}
                                     onChange={(e) => handleUpdateItem(item.id, 'amount', parseFloat(e.target.value) || 0)}
-                                    min="0"
+                                    // min="0" removed to allow negative adjustments
                                     step="0.01"
                                 />
                             </div>

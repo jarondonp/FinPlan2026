@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock, CreditCard, History, Edit3 } from 'lucide-react';
+import { Plus, ChevronDown, ChevronUp, AlertTriangle, Settings, History, PiggyBank, Briefcase, Lock, Wallet, RotateCcw, Coins, Building2, Trash2, PieChart, Target, TrendingUp, CreditCard } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { doc, setDoc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
@@ -11,6 +11,7 @@ import { closingService } from '../../services/ClosingService';
 import { hybridBudgetService } from '../../services/HybridBudgetService';
 import { calculateGoalQuota } from '../../utils/subscriptionHelpers';
 import { EditHistoryModal } from './EditHistoryModal';
+import { BudgetReviewModal } from './BudgetReviewModal';
 import { BudgetEditHistoryService } from '../../services/BudgetEditHistoryService';
 import { BudgetItem } from '../../types/budgetEditHistory';
 import { InlineItemEditor } from './InlineItemEditor';
@@ -47,6 +48,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
 
     const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
     const [showHistory, setShowHistory] = useState(false);
+    const [showReview, setShowReview] = useState(false);
     const [editingCategory, setEditingCategory] = useState<{ category: string, budgetType: 'fixed' | 'reserved' | 'variable' } | null>(null);
 
     // Fetch Hybrid Budget Data
@@ -112,7 +114,6 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             const currentItems = ((currentCategory?.details as any)?.[budgetType]) || [];
 
             // Calculate totals
-            // Calculate totals
             const previousTotal = currentItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
 
             // Fix: Handle empty list explicitly
@@ -120,7 +121,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             const newTotal = safeNewItems.reduce((sum, item) => sum + (item.amount || 0), 0);
 
             // 2. Update in Firebase (monthly_budgets)
-            const monthKey = `${scope}_${timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}`;
+            const monthKey = `${scope}_${timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)} `;
             const budgetDocRef = doc(db, 'users', user.uid, 'monthly_budgets', monthKey);
 
             const currentDoc = await getDoc(budgetDocRef);
@@ -264,7 +265,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
 
                         <div className="flex-1 w-full text-center md:text-left">
                             <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Por Asignar</span>
-                            <div className={`text - 2xl font - mono font - bold ${projectedIncome - totalBudgeted < 0 ? 'text-rose-400' : 'text-indigo-400'} `}>
+                            <div className={`text-2xl font-mono font-bold ${projectedIncome - totalBudgeted < 0 ? 'text-rose-400' : 'text-indigo-400'}`}>
                                 {formatCurrency(projectedIncome - totalBudgeted)}
                             </div>
                         </div>
@@ -472,6 +473,14 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                                 Historial
                             </button>
 
+                            <button
+                                onClick={() => setShowReview(true)}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
+                            >
+                                <PieChart size={14} />
+                                Revisión
+                            </button>
+
 
 
                             {isMonthClosed ? (
@@ -521,16 +530,31 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                         </div>
                     </div>
                 </div >
-            </div>
+            </div >
             {/* Edit History Modal */}
-            {showHistory && user && (
-                <EditHistoryModal
-                    userId={user.uid}
-                    scope={scope.toUpperCase() as any}
-                    month={timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}
-                    onClose={() => setShowHistory(false)}
-                />
-            )}
+            {
+                showHistory && user && (
+                    <EditHistoryModal
+                        userId={user.uid}
+                        scope={scope.toUpperCase() as any}
+                        month={timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}
+                        onClose={() => setShowHistory(false)}
+                    />
+                )
+            }
+
+            {/* Comparison Review Modal */}
+            {
+                showReview && user && (
+                    <BudgetReviewModal
+                        isOpen={showReview}
+                        onClose={() => setShowReview(false)}
+                        userId={user.uid}
+                        scope={scope.toUpperCase() as any}
+                        currentMonth={timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}
+                    />
+                )
+            }
         </div>
     );
 };
