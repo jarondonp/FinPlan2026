@@ -199,29 +199,73 @@ export const hybridBudgetService = {
         });
 
         // 3. Fetch Manual Variable Budget (from monthly_budgets)
-        const budgetSnap = await getDocs(query(
-            collection(db, 'users', user.uid, 'monthly_budgets'),
-            where('month', '==', monthStr)
-        ));
+        // STRATEGY: Try to fetch the Monolithic Document for this Scope + Month first.
+        // This is the formatted ID: [SCOPE]_[YYYY-MM]
+        const budgetDocId = `${scope}_${monthStr}`;
+        try {
+            const budgetDocRef = doc(db, 'users', user.uid, 'monthly_budgets', budgetDocId);
+            const budgetDocSnap = await getDocs(query(collection(db, 'users', user.uid, 'monthly_budgets'), where('month', '==', monthStr)));
+            // Note: We check both the specific new ID format AND legacy individual docs if needed. 
+            // For now, let's prioritize the new monolithic structure used by BudgetModule.
 
-        budgetSnap.docs
-            .map(d => d.data() as MonthlyBudget)
-            .filter(b => isInScope(b.scope))
-            .forEach(b => {
-                if (breakdown.has(b.category)) {
-                    const entry = breakdown.get(b.category)!;
-                    entry.variable = b.assigned;
-                    // Manual Budget doesn't have multiple items usually, just the total assigned.
-                    // We add a single item representing the manual assignment.
-                    if (b.assigned > 0) {
-                        entry.details.variable.push({
-                            id: b.id,
-                            name: 'Asignación Manual',
-                            amount: b.assigned
-                        });
-                    }
+            // A. Check specific monolithic doc (Direct Read)
+            const exactDocSnap = await import('firebase/firestore').then(mod => mod.getDoc(budgetDocRef));
+
+            if (exactDocSnap.exists()) {
+                const data = exactDocSnap.data();
+                if (data.categories) {
+                    Object.entries(data.categories).forEach(([catName, catData]: [string, any]) => {
+                        if (breakdown.has(catName)) {
+                            const entry = breakdown.get(catName)!;
+
+                            // Update total variable amount
+                            entry.variable = catData.variable || 0;
+                            // Update details if present
+                            if (catData.details?.variable && Array.isArray(catData.details.variable)) {
+                                entry.details.variable = catData.details.variable;
+                            } else if (entry.variable > 0) {
+                                // Fallback for data without details
+                                entry.details.variable.push({
+                                    id: 'manual_legacy',
+                                    name: 'Asignación Manual',
+                                    amount: entry.variable
+                                });
+                            }
+                        }
+                    });
                 }
-            });
+            } else {
+                // B. Fallback: Query collection for documents matching the month (Legacy behavior)
+                // This handles cases where data might be stored as individual docs or different IDs.
+                const budgetSnap = await getDocs(query(
+                    collection(db, 'users', user.uid, 'monthly_budgets'),
+                    where('month', '==', monthStr)
+                ));
+
+                budgetSnap.docs
+                    .map(d => d.data() as MonthlyBudget)
+                    .filter(b => isInScope(b.scope))
+                    .forEach(b => {
+                        if (breakdown.has(b.category)) {
+                            const entry = breakdown.get(b.category)!;
+                            entry.variable = b.assigned;
+
+                            const storedDetails = (b as any).details?.variable as BudgetDetailItem[];
+                            if (storedDetails && Array.isArray(storedDetails) && storedDetails.length > 0) {
+                                entry.details.variable = storedDetails;
+                            } else if (b.assigned > 0) {
+                                entry.details.variable.push({
+                                    id: b.id,
+                                    name: 'Asignación Manual',
+                                    amount: b.assigned
+                                });
+                            }
+                        }
+                    });
+            }
+        } catch (e) {
+            console.error("Error fetching monthly budget:", e);
+        }
 
         // --- NEW: INJECT SAVINGS GOALS ---
         try {

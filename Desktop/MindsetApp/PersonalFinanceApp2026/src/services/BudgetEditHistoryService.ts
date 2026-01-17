@@ -52,7 +52,7 @@ export class BudgetEditHistoryService {
                 new_total: newTotal,
                 new_items: newItems,
                 timestamp: Timestamp.now(),
-                edit_reason: editReason || undefined,
+                edit_reason: editReason || null, // Use null instead of undefined
                 total_change: totalChange,
                 items_added: itemsAdded,
                 items_removed: itemsRemoved,

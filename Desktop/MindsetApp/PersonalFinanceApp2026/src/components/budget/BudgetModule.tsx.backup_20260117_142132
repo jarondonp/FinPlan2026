@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { PiggyBank, Target, TrendingUp, AlertTriangle, Settings, Plus, Trash2, Eye, EyeOff, Info, Lock, CreditCard, History, Edit3 } from 'lucide-react';
 import { db } from '../../firebase/config';
-import { doc, setDoc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFirestore } from '../../hooks/useFirestore';
 import { formatCurrency, getRandomColor, generateId } from '../../utils';
@@ -13,8 +13,6 @@ import { calculateGoalQuota } from '../../utils/subscriptionHelpers';
 import { EditHistoryModal } from './EditHistoryModal';
 import { BudgetEditHistoryService } from '../../services/BudgetEditHistoryService';
 import { BudgetItem } from '../../types/budgetEditHistory';
-import { InlineItemEditor } from './InlineItemEditor';
-import { BudgetCategoryRow } from './BudgetCategoryRow';
 
 interface BudgetModuleProps {
     onNavigateToSettings: () => void;
@@ -47,7 +45,7 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
 
     const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
     const [showHistory, setShowHistory] = useState(false);
-    const [editingCategory, setEditingCategory] = useState<{ category: string, budgetType: 'fixed' | 'reserved' | 'variable' } | null>(null);
+    const [editingCategory, setEditingCategory] = useState<{ category: string, items: BudgetItem[], total: number } | null>(null);
 
     // Fetch Hybrid Budget Data
     const fetchBudget = async () => {
@@ -94,93 +92,6 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
             setTotalBudgeted(newData.reduce((sum, item) => sum + item.totalLimit, 0));
             return newData;
         });
-    };
-
-    // Handler: Save edited items with history tracking
-    const handleSaveItemsWithTracking = async (
-        category: string,
-        budgetType: 'fixed' | 'reserved' | 'variable',
-        newItems: BudgetItem[],
-        editReason?: string
-    ) => {
-        if (!user || !timeframe.start) return;
-
-        try {
-            // 1. Get current items for comparison
-            const currentCategory = budgetData.find(c => c.category === category);
-            // Safe access using any to bypass strict type check on the complex hybrid object for now
-            const currentItems = ((currentCategory?.details as any)?.[budgetType]) || [];
-
-            // Calculate totals
-            // Calculate totals
-            const previousTotal = currentItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
-
-            // Fix: Handle empty list explicitly
-            const safeNewItems = newItems && newItems.length > 0 ? newItems : [];
-            const newTotal = safeNewItems.reduce((sum, item) => sum + (item.amount || 0), 0);
-
-            // 2. Update in Firebase (monthly_budgets)
-            const monthKey = `${scope}_${timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}`;
-            const budgetDocRef = doc(db, 'users', user.uid, 'monthly_budgets', monthKey);
-
-            const currentDoc = await getDoc(budgetDocRef);
-            const currentData = currentDoc.data() || {};
-            const categories = currentData.categories || {};
-
-            if (!categories[category]) {
-                categories[category] = { fixed: 0, reserved: 0, variable: 0, details: {} };
-            }
-            categories[category].details = categories[category].details || {};
-            categories[category].details[budgetType] = safeNewItems;
-            categories[category][budgetType] = newTotal;
-
-            console.log('Saving budget items:', { category, budgetType, items: safeNewItems, total: newTotal });
-
-            await setDoc(budgetDocRef, { ...currentData, categories }, { merge: true });
-
-            // 3. Track in history
-            await BudgetEditHistoryService.saveEdit(
-                user.uid,
-                scope as any,
-                timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7),
-                category,
-                budgetType,
-                previousTotal,
-                currentItems.filter((i: any) => i).map((item: any) => ({
-                    id: item.id || '',
-                    name: item.name || '',
-                    amount: item.amount || 0
-                })),
-                newTotal,
-                safeNewItems,
-                editReason
-            );
-
-            // 4. Refresh budget data
-            await fetchBudget();
-
-            // 5. Close editor
-            setEditingCategory(null);
-        } catch (error) {
-            console.error('Error saving items:', error);
-            alert('Error al guardar cambios');
-        }
-    };
-
-    // TEMPORARY DEBUG: Clear history
-    const handleClearHistory = async () => {
-        if (!confirm('¿Borrar todo el historial de este mes? Esto no se puede deshacer.')) return;
-        try {
-            const h = await BudgetEditHistoryService.getHistory(user!.uid, scope as any, timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7));
-            const { deleteDoc, doc } = await import('firebase/firestore');
-            const { db } = await import('../../firebase/config');
-
-            await Promise.all(h.map(entry => deleteDoc(doc(db, 'users', user!.uid, 'budget_edit_history', entry.id))));
-            alert('Historial borrado.');
-        } catch (e) {
-            console.error(e);
-            alert('Error al borrar');
-        }
     };
 
     const handleAddGoal = async () => {
@@ -462,18 +373,6 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             <PiggyBank size={18} className="text-emerald-600" /> Presupesto Híbrido
                         </h3>
                         <div className="flex gap-2">
-
-
-                            <button
-                                onClick={() => setShowHistory(true)}
-                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-200"
-                            >
-                                <History size={14} />
-                                Historial
-                            </button>
-
-
-
                             {isMonthClosed ? (
                                 <span className="text-xs font-bold text-slate-400 px-3 py-1.5 bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200 cursor-not-allowed">
                                     <AlertTriangle size={12} /> Mes Cerrado - Lectura
@@ -491,22 +390,203 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                             <div className="p-8 text-center text-slate-500">Cargando presupuesto...</div>
                         ) : (
                             <div className="divide-y divide-slate-100">
-                                {budgetData.map(cat => (
-                                    <BudgetCategoryRow
-                                        key={cat.category}
-                                        category={cat}
-                                        isExpanded={expandedCategory === cat.category}
-                                        isMonthClosed={isMonthClosed}
-                                        detailView={detailView}
-                                        editingCategory={editingCategory}
-                                        onToggleExpand={() => setExpandedCategory(expandedCategory === cat.category ? null : cat.category)}
-                                        onSetDetailView={(view) => setDetailView(view)}
-                                        onUpdateVariable={(value) => handleUpdateVariable(cat.category, value)}
-                                        onStartEdit={(budgetType) => setEditingCategory({ category: cat.category, budgetType })}
-                                        onSaveItems={(items, reason) => handleSaveItemsWithTracking(cat.category, editingCategory?.budgetType || 'variable', items, reason)}
-                                        onCancelEdit={() => setEditingCategory(null)}
-                                    />
-                                ))}
+                                {budgetData.map(cat => {
+                                    const totalLimit = cat.totalLimit;
+                                    const percentage = totalLimit > 0 ? (cat.spent / totalLimit) * 100 : 0;
+
+                                    // Segment Percentages for Bar
+                                    const pFixed = totalLimit > 0 ? (cat.fixed / totalLimit) * 100 : 0;
+                                    const pReserve = totalLimit > 0 ? (cat.reserved / totalLimit) * 100 : 0;
+                                    const pVariable = totalLimit > 0 ? (cat.variable / totalLimit) * 100 : 0;
+
+                                    const isExpanded = expandedCategory === cat.category;
+
+                                    return (
+                                        <div key={cat.category} className="hover:bg-slate-50 transition-colors">
+                                            {/* Main Row */}
+                                            <div
+                                                className="p-4 cursor-pointer"
+                                                onClick={() => setExpandedCategory(isExpanded ? null : cat.category)}
+                                            >
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        {cat.category === "Metas de Patrimonio" && <TrendingUp size={16} className="text-indigo-600" />}
+                                                        <span className={`font-bold ${cat.category === "Metas de Patrimonio" ? 'text-indigo-700' : 'text-slate-700'}`}>
+                                                            {cat.category}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <span className={`font-mono font-bold text-sm ${cat.spent > cat.totalLimit ? 'text-rose-600' : (cat.category === "Metas de Patrimonio" ? 'text-indigo-600' : 'text-slate-700')}`}>
+                                                            {formatCurrency(cat.spent)}
+                                                        </span>
+                                                        <span className="text-xs text-slate-400 mx-1">/</span>
+                                                        <span className="text-xs font-medium text-slate-500">{formatCurrency(cat.totalLimit)}</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Stacked Progress Bar */}
+                                                <div className="w-full bg-slate-100 rounded-full h-3 relative flex overflow-hidden">
+                                                    {/* Fixed - Dark Blue */}
+                                                    <div className="bg-slate-700 h-full" style={{ width: `${pFixed}%` }} title={`Fijo: ${formatCurrency(cat.fixed)}`}></div>
+                                                    {/* Reserved - Purple */}
+                                                    <div className="bg-violet-500 h-full" style={{ width: `${pReserve}%` }} title={`Reserva: ${formatCurrency(cat.reserved)}`}></div>
+                                                    {/* Variable - Green */}
+                                                    <div className="bg-emerald-500 h-full" style={{ width: `${pVariable}%` }} title={`Variable: ${formatCurrency(cat.variable)}`}></div>
+
+                                                    {/* Savings specialized bar color */}
+                                                    {cat.category === "Metas de Patrimonio" && (
+                                                        <div className="absolute inset-0 bg-indigo-500/10 animate-pulse pointer-events-none"></div>
+                                                    )}
+
+                                                    {/* Spending Marker Line */}
+                                                    <div
+                                                        className="absolute top-0 bottom-0 w-0.5 bg-black z-10 shadow-[0_0_4px_rgba(0,0,0,0.5)]"
+                                                        style={{ left: `${Math.min(percentage, 100)}%` }}
+                                                        title={`Gastado: ${formatCurrency(cat.spent)}`}
+                                                    ></div>
+                                                </div>
+                                            </div>
+
+                                            {/* Expanded Edit Panel */}
+                                            {isExpanded && (
+                                                <div className="px-4 pb-4 bg-slate-50/50 animate-in slide-in-from-top-1">
+
+                                                    {/* For "Metas de Patrimonio", show goal list directly */}
+                                                    {cat.category === "Metas de Patrimonio" ? (
+                                                        <div className="bg-white rounded-xl border border-indigo-200 p-3 shadow-inner">
+                                                            <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-3 border-b border-indigo-100 pb-1 flex items-center gap-1">
+                                                                <Target size={12} /> Metas de Ahorro Activas
+                                                            </h5>
+                                                            <div className="space-y-2">
+                                                                {cat.details?.reserved?.length === 0 ? (
+                                                                    <p className="text-xs text-slate-400 italic text-center py-2">No hay metas activas este mes.</p>
+                                                                ) : (
+                                                                    cat.details?.reserved?.map((item: any) => (
+                                                                        <div key={item.id} className="flex justify-between items-center text-xs p-2 bg-indigo-50/50 hover:bg-indigo-100/50 rounded-lg group transition-colors border border-indigo-100">
+                                                                            <span className="font-medium text-slate-700">{item.name}</span>
+                                                                            <div className="text-right">
+                                                                                <div className="font-mono font-bold text-indigo-700">{formatCurrency(item.amount)}</div>
+                                                                                {item.notice && <div className="text-[10px] text-indigo-500 font-medium">{item.notice}</div>}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : cat.category === "Servicio de Deuda" ? (
+                                                        /* For "Servicio de Deuda", show debt list directly */
+                                                        <div className="bg-white rounded-xl border border-rose-200 p-3 shadow-inner">
+                                                            <h5 className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-3 border-b border-rose-100 pb-1 flex items-center gap-1">
+                                                                <CreditCard size={12} /> Deudas del Mes
+                                                            </h5>
+                                                            <div className="space-y-2">
+                                                                {/* Combine all debt items from fixed and reserved */}
+                                                                {(() => {
+                                                                    const allDebtItems = [
+                                                                        ...(cat.details?.fixed || []),
+                                                                        ...(cat.details?.reserved || [])
+                                                                    ];
+
+                                                                    return allDebtItems.length === 0 ? (
+                                                                        <p className="text-xs text-slate-400 italic text-center py-2">No hay pagos de deuda este mes.</p>
+                                                                    ) : (
+                                                                        allDebtItems.map((item: any) => (
+                                                                            <div key={item.id} className="flex justify-between items-center text-xs p-2 bg-rose-50/50 hover:bg-rose-100/50 rounded-lg group transition-colors border border-rose-100">
+                                                                                <span className="font-medium text-slate-700">{item.name}</span>
+                                                                                <div className="text-right">
+                                                                                    <div className="font-mono font-bold text-rose-700">{formatCurrency(item.amount)}</div>
+                                                                                    {item.notice && <div className="text-[10px] text-rose-500 font-medium">{item.notice}</div>}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))
+                                                                    );
+                                                                })()}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            {/* Summary Boxes (Clickable) - Only for regular categories */}
+                                                            <div className="flex gap-4 text-xs mb-3">
+                                                                {/* Recurrente Box */}
+                                                                <div
+                                                                    onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'fixed' && detailView?.category === cat.category ? null : { category: cat.category, type: 'fixed' }); }}
+                                                                    className={`flex-1 p-2 rounded border cursor-pointer transition-all ${detailView?.type === 'fixed' && detailView?.category === cat.category ? 'ring-2 ring-slate-400 bg-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`}
+                                                                >
+                                                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1 flex items-center gap-1">
+                                                                        <Lock size={10} /> Recurrente {cat.details?.fixed?.length > 0 && `(${cat.details.fixed.length})`}
+                                                                    </label>
+                                                                    <div className="font-mono font-bold text-slate-600">{formatCurrency(cat.fixed)}</div>
+                                                                </div>
+
+                                                                {/* Smart Reserve Box */}
+                                                                <div
+                                                                    onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'reserved' && detailView?.category === cat.category ? null : { category: cat.category, type: 'reserved' }); }}
+                                                                    className={`flex-1 p-2 rounded border cursor-pointer transition-all ${detailView?.type === 'reserved' && detailView?.category === cat.category ? 'ring-2 ring-violet-400 bg-violet-100' : 'bg-violet-50 border-violet-100 hover:bg-violet-100'}`}
+                                                                >
+                                                                    <label className="block text-[10px] uppercase text-violet-500 font-bold mb-1 flex items-center gap-1">
+                                                                        <Lock size={10} /> Smart Reserve {cat.details?.reserved?.length > 0 && `(${cat.details.reserved.length})`}
+                                                                    </label>
+                                                                    <div className="font-mono font-bold text-violet-700">{formatCurrency(cat.reserved)}</div>
+                                                                    {cat.reservationNotice && <div className="text-[9px] text-violet-500 font-medium mt-1">{cat.reservationNotice}</div>}
+                                                                </div>
+
+                                                                {/* Editable Variable Field (Clickable for details too) */}
+                                                                <div className="flex-1 p-2 bg-white rounded border border-emerald-200 shadow-sm ring-2 ring-emerald-50">
+                                                                    <div
+                                                                        className="cursor-pointer"
+                                                                        onClick={(e) => { e.stopPropagation(); setDetailView(detailView?.type === 'variable' && detailView?.category === cat.category ? null : { category: cat.category, type: 'variable' }); }}
+                                                                    >
+                                                                        <label className="block text-[10px] uppercase text-emerald-600 font-bold mb-1">
+                                                                            Variable Manual {cat.details?.variable?.length > 0 && `(${cat.details.variable.length})`}
+                                                                        </label>
+                                                                    </div>
+                                                                    {isMonthClosed ? (
+                                                                        <div className="font-mono font-bold text-slate-400">{formatCurrency(cat.variable)}</div>
+                                                                    ) : (
+                                                                        <div className="flex items-center gap-1">
+                                                                            <span className="text-slate-400">$</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="w-full bg-transparent font-bold text-slate-800 outline-none"
+                                                                                value={cat.variable}
+                                                                                onChange={(e) => handleUpdateVariable(cat.category, parseFloat(e.target.value) || 0)}
+                                                                                onClick={(e) => e.stopPropagation()} // Stop propagation to avoid toggling details when typing
+                                                                            />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Detail List View - Only for regular categories */}
+                                                            {detailView?.category === cat.category && cat.details && (
+                                                                <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-inner animate-in slide-in-from-top-2 mx-1 mb-2">
+                                                                    <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">
+                                                                        Detalle: {detailView.type === 'fixed' ? 'Gastos Recurrentes' : detailView.type === 'reserved' ? 'Reservas Inteligentes' : 'Presupuesto Variable'}
+                                                                    </h5>
+                                                                    <div className="space-y-1">
+                                                                        {cat.details[detailView.type]?.length === 0 ? (
+                                                                            <p className="text-xs text-slate-400 italic text-center py-2">No hay items en esta sección.</p>
+                                                                        ) : (
+                                                                            cat.details[detailView.type]?.map((item: any) => (
+                                                                                <div key={item.id} className="flex justify-between items-center text-xs p-2 hover:bg-slate-50 rounded-lg group transition-colors">
+                                                                                    <span className="font-medium text-slate-700">{item.name}</span>
+                                                                                    <div className="text-right">
+                                                                                        <div className="font-mono font-bold text-slate-800">{formatCurrency(item.amount)}</div>
+                                                                                        {item.notice && <div className="text-[10px] text-amber-600 font-medium">{item.notice}</div>}
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                         <div className="bg-slate-50 p-3 flex justify-between items-center border-t border-slate-200">
@@ -521,16 +601,8 @@ export const BudgetModule = ({ onNavigateToSettings }: BudgetModuleProps) => {
                         </div>
                     </div>
                 </div >
-            </div>
-            {/* Edit History Modal */}
-            {showHistory && user && (
-                <EditHistoryModal
-                    userId={user.uid}
-                    scope={scope.toUpperCase() as any}
-                    month={timeframe.start ? new Date(timeframe.start).toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7)}
-                    onClose={() => setShowHistory(false)}
-                />
-            )}
-        </div>
+            </div >
+        </div >
     );
 };
+
